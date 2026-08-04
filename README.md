@@ -35,12 +35,35 @@ multi-line responses use `250-` for continuation, `250 ` for the last
 line) over an injected `Transport` (`test/smtp/fake_transport.cljc`, a
 scripted in-memory `Transport`).
 
-**Scope, deliberately narrow**: implicit TLS (port 465) connect, EHLO,
-AUTH LOGIN (base64 user/pass, the mechanism Gmail's SMTP submission
-accepts with an app password), MAIL FROM/RCPT TO/DATA with RFC 5321
-transparency (dot-stuffing), QUIT. No STARTTLS, no AUTH PLAIN/XOAUTH2, no
-multi-recipient send in one call -- add these if a real use case needs
-them; they don't exist speculatively here.
+## RFC 5321 coverage
+
+| area | commands |
+|---|---|
+| session | connect (implicit TLS, 465), EHLO with extension parsing, STARTTLS (RFC 3207, injected upgrade), RSET, NOOP, QUIT |
+| auth | AUTH LOGIN, AUTH PLAIN (RFC 4616), AUTH XOAUTH2, and `authenticate!` which picks the strongest mechanism offered |
+| sending | MAIL FROM, **one or more RCPT TO in one transaction**, DATA with RFC 5321 §4.5.2 dot-stuffing |
+| responses | multi-line responses, ESMTP extension map, `AUTH` mechanism set, `SIZE` limit, enhanced status codes (RFC 3463) |
+
+**Every recipient goes in one transaction.** `send-mail!` used to take a
+single `:to`, so a caller with three recipients either dropped two or opened
+three transactions — and three transactions is three separate messages, each
+carrying only its own address in the header, so nobody can see who else
+received it and a reply-all reaches one person. RFC 5321 §3.3 has one MAIL
+FROM and *one or more* RCPT TO.
+
+A recipient the server refuses does not abort the send (§3.3 allows partial
+acceptance); `send-mail!` returns `:accepted` and `:rejected`, the latter with
+the RFC 3463 status, so a caller can tell `5.1.1` (no such mailbox) from
+`5.7.1` (refused on policy). All recipients refused does throw.
+
+**`:bcc` is a recipient and never a header.** A blind carbon copy is blind
+because the address appears in RCPT TO and not in the message.
+
+**Not implemented**: PIPELINING, CHUNKING/BDAT, DSN, SMTPUTF8, AUTH beyond
+LOGIN/PLAIN/XOAUTH2, and message *construction* beyond `mime-message`'s
+minimal plain-text form — pass `:raw` for anything with MIME parts, transfer
+encodings or an RFC 2047 subject. `kotoba-lang/org-ietf-mime` is the library
+for that shape.
 
 ## Usage
 
@@ -51,9 +74,19 @@ them; they don't exist speculatively here.
     (client/ehlo! "my-host.example.com")
     (client/auth-login! "you@gmail.com" "app-password")
     (assoc :from "you@gmail.com")
-    (client/send-mail! {:to "friend@example.com" :subject "hi" :body "hello"
+    (client/send-mail! {:to ["friend@example.com" "other@example.com"]
+                        :cc "manager@example.com"
+                        :bcc "archive@example.com"   ; delivered, never in a header
+                        :subject "hi" :body "hello"
                         :in-reply-to "<original-message-id@mail.gmail.com>"})
     client/quit!)
+;; send-mail! returns the session with :accepted and :rejected
+
+;; An OAuth grant, over submission on 587:
+(-> (client/connect! "smtp.office365.com" {:port 587 :tls? false})
+    (client/ehlo! "my-host.example.com")
+    (client/starttls! "my-host.example.com" upgrade-fn)  ; re-EHLOs, per RFC 3207 §4.2
+    (client/authenticate! {:user "you@example.com" :access-token token}))
 ```
 
 ## Tests
