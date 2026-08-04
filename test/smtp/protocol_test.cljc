@@ -1,5 +1,6 @@
 (ns smtp.protocol-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [smtp.protocol :as p]))
 
 (deftest response-line-parses-final-vs-continuation-lines
@@ -35,3 +36,55 @@
 (deftest mime-message-includes-in-reply-to-when-given
   (is (re-find #"In-Reply-To: <1@x>\r\n"
               (p/mime-message {:from "a" :to "b" :subject "s" :body "" :in-reply-to "<1@x>"}))))
+
+;; --- ESMTP / SASL / enhanced status -----------------------------------------
+
+(deftest parse-extensions-drops-the-greeting-and-upper-cases-keywords
+  (let [ext (p/parse-extensions ["smtp.example.com Hello"
+                                 "SIZE 35882577"
+                                 "8bitmime"
+                                 "AUTH LOGIN PLAIN XOAUTH2"])]
+    (is (= "35882577" (get ext "SIZE")))
+    (is (= "" (get ext "8BITMIME")) "a keyword with no parameter is still there")
+    (is (nil? (get ext "SMTP.EXAMPLE.COM")) "the greeting is not an extension")))
+
+(deftest auth-mechanisms-and-max-size-read-what-a-client-decides-on
+  (let [ext (p/parse-extensions ["greeting" "AUTH PLAIN LOGIN" "SIZE 100"])]
+    (is (= #{"PLAIN" "LOGIN"} (p/auth-mechanisms ext)))
+    (is (= 100 (p/max-size ext))))
+  (testing "absent extensions are nil/empty rather than an error"
+    (is (= #{} (p/auth-mechanisms {})))
+    (is (nil? (p/max-size {})))))
+
+(deftest plain-credentials-carry-the-empty-authorization-identity
+  (is (= (str (char 0) "me" (char 0) "pw") (p/plain-credentials "me" "pw"))))
+
+(deftest xoauth2-credentials-have-the-shape-google-accepts
+  (is (= (str "user=me" (char 0) "auth=Bearer tok" (char 0) (char 0))
+         (p/xoauth2-credentials "me" "tok"))))
+
+(deftest enhanced-status-separates-refusals-that-need-different-answers
+  (testing "550 says rejected; 5.1.1 says no such mailbox and 5.7.1 says
+            refused on policy, which are different conversations to have
+            with whoever sent it"
+    (is (= "5.1.1" (p/enhanced-status "5.1.1 No such user here")))
+    (is (= "5.7.1" (p/enhanced-status "5.7.1 Message refused")))
+    (is (= "2.1.5" (p/enhanced-status "2.1.5 Recipient OK"))))
+  (testing "and a response without one is not invented"
+    (is (nil? (p/enhanced-status "No such user here")))
+    (is (nil? (p/enhanced-status "")))))
+
+(deftest mime-message-renders-many-recipients-and-never-a-bcc
+  (let [msg (p/mime-message {:from "me@example.com"
+                             :to ["a@example.com" "b@example.com"]
+                             :cc "c@example.com"
+                             :bcc "secret@example.com"
+                             :subject "s" :body "hi"})]
+    (is (str/includes? msg "To: a@example.com, b@example.com\r\n"))
+    (is (str/includes? msg "Cc: c@example.com\r\n"))
+    (is (not (str/includes? msg "secret@example.com"))
+        "a blind copy that appears in the message is not blind")))
+
+(deftest mime-message-omits-cc-entirely-when-there-is-none
+  (is (not (str/includes? (p/mime-message {:from "a" :to "b" :subject "s" :body "x"})
+                          "Cc:"))))
