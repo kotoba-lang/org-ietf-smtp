@@ -56,7 +56,7 @@
   things a client actually decides on, which callers previously had to
   re-derive by scanning strings themselves."
   [session domain]
-  (let [resp (assert-positive! (send-line! session (p/command "EHLO" domain)) "EHLO")
+  (let [resp (assert-positive! (send-line! session (p/ehlo-line domain)) "EHLO")
         lines (str/split-lines (:text resp))
         extensions (p/parse-extensions lines)]
     (assoc session
@@ -88,7 +88,7 @@
   routinely advertise AUTH only *after* TLS. A client that keeps the
   cleartext capability list concludes the server offers no AUTH at all."
   [session domain upgrade-fn]
-  (assert-positive! (send-line! session (p/command "STARTTLS")) "STARTTLS")
+  (assert-positive! (send-line! session (p/starttls-line)) "STARTTLS")
   (-> session
       (assoc :transport (upgrade-fn (:transport session)))
       (dissoc :capabilities :extensions :auth-mechanisms :max-size)
@@ -98,9 +98,9 @@
   "AUTH LOGIN with a plaintext user/pass (an app password for Gmail-style
   accounts, per this library's TLS-only transport). Returns `session`."
   [session user pass]
-  (assert-positive! (send-line! session (p/command "AUTH" "LOGIN")) "AUTH LOGIN")
-  (assert-positive! (send-line! session (str (p/base64 user) "\r\n")) "AUTH LOGIN (username)")
-  (assert-positive! (send-line! session (str (p/base64 pass) "\r\n")) "AUTH LOGIN (password)")
+  (assert-positive! (send-line! session (p/auth-login-line)) "AUTH LOGIN")
+  (assert-positive! (send-line! session (p/payload-line (p/base64 user))) "AUTH LOGIN (username)")
+  (assert-positive! (send-line! session (p/payload-line (p/base64 pass))) "AUTH LOGIN (password)")
   session)
 
 (defn auth-plain!
@@ -111,8 +111,8 @@
   for PLAIN and every server that advertises PLAIN accepts it."
   [session user pass]
   (assert-positive!
-   (send-line! session (p/command "AUTH" "PLAIN"
-                                  (p/base64 (p/plain-credentials user pass))))
+   (send-line! session (p/auth-plain-line
+                       (p/base64 (p/plain-credentials user pass))))
    "AUTH PLAIN")
   session)
 
@@ -129,10 +129,10 @@
   as success reports a send that never happened."
   [session user access-token]
   (let [resp (send-line! session
-                         (p/command "AUTH" "XOAUTH2"
-                                    (p/base64 (p/xoauth2-credentials user access-token))))]
+                         (p/auth-xoauth2-line
+                          (p/base64 (p/xoauth2-credentials user access-token))))]
     (if (p/xoauth2-continue? (:code resp))
-      (let [final (send-line! session "\r\n")]
+      (let [final (send-line! session (p/empty-line))]
         (assert-positive! final "AUTH XOAUTH2")
         session)
       (do (assert-positive! resp "AUTH XOAUTH2")
@@ -199,13 +199,10 @@
   (let [recipients (recipients-of msg)
         _ (when (empty? recipients)
             (throw (ex-info "SMTP send with no recipient" {:msg (dissoc msg :body)})))
-        size-hint (when (supports? session "SIZE") nil)
-        _ (assert-positive! (send-line! session (p/command "MAIL" (str "FROM:<" from ">")
-                                                           size-hint))
+        _ (assert-positive! (send-line! session (p/mail-from-line from))
                             "MAIL FROM")
         results (reduce (fn [acc recipient]
-                          (let [resp (send-line! session
-                                                 (p/command "RCPT" (str "TO:<" recipient ">")))]
+                          (let [resp (send-line! session (p/rcpt-to-line recipient))]
                             (if (p/positive? (:code resp))
                               (update acc :accepted conj recipient)
                               (update acc :rejected conj
@@ -219,7 +216,7 @@
       (throw (ex-info (str "SMTP RCPT TO failed for every recipient: "
                            (str/join "; " (map :text (:rejected results))))
                       (assoc results :verb "RCPT TO"))))
-    (assert-positive! (send-line! session (p/command "DATA")) "DATA")
+    (assert-positive! (send-line! session (p/data-line)) "DATA")
     (assert-positive! (send-line! session
                                   (p/dot-stuff (or (:raw msg)
                                                    (p/mime-message (assoc msg :from from)))))
@@ -236,13 +233,13 @@
   left mid-transaction rejects the next MAIL FROM, and the error names
   sequencing rather than whatever actually went wrong."
   [session]
-  (assert-positive! (send-line! session (p/command "RSET")) "RSET")
+  (assert-positive! (send-line! session (p/rset-line)) "RSET")
   session)
 
 (defn noop!
   "NOOP — is this connection still alive (RFC 5321 §4.1.1.9)."
   [session]
-  (assert-positive! (send-line! session (p/command "NOOP")) "NOOP")
+  (assert-positive! (send-line! session (p/noop-line)) "NOOP")
   session)
 
 (defn quit!
@@ -250,6 +247,6 @@
   transport is closed either way) but not a transport-level exception
   raised before that point."
   [{:keys [transport] :as session}]
-  (try (send-line! session (p/command "QUIT")) (catch #?(:clj Exception :cljs :default) _ nil))
+  (try (send-line! session (p/quit-line)) (catch #?(:clj Exception :cljs :default) _ nil))
   (t/close! transport)
   nil)

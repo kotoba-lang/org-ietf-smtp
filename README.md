@@ -35,22 +35,28 @@ multi-line responses use `250-` for continuation, `250 ` for the last
 line) over an injected `Transport` (`test/smtp/fake_transport.cljc`, a
 scripted in-memory `Transport`).
 
-The judgements that do not walk text -- reply class (`positive?`), the
-XOAUTH2 334 trap, and the SASL pick -- also live as a Kotoba decision core
-in `kotoba/smtp/protocol_core.kotoba` (typed) and
-`kotoba/smtp/protocol_core.cljk` (Clojure-shaped). Command strings, regex,
-base64 and the socket stay in `.cljc`. Compile either source with the
-kotoba CLI:
+The SASL pick that does not walk text — reply class (`positive?`), the
+XOAUTH2 334 trap, and which mechanism to attempt — also lives as a Kotoba
+**fallback** in `kotoba/smtp/protocol_core.kotoba` (and `.cljk`). That core
+is packed into integers because the named backend's max-parameters is 5;
+it is not the template for SMTP. Command construction is ordinary Kotoba
+strings in `kotoba/smtp/protocol_commands.{kotoba,cljk}` (EHLO, MAIL FROM,
+RCPT TO, AUTH, DATA, QUIT). Regex parse, base64 and the socket stay in
+`.cljc` / the host. Compile with the kotoba CLI:
 
 ```sh
+kotoba compile kotoba/smtp/protocol_commands.kotoba --target wasm -o commands.wasm
+kotoba compile kotoba/smtp/protocol_commands.cljk --target wasm -o commands.wasm
+kotoba compile kotoba/smtp/protocol_commands.kotoba --target web -o commands.mjs
 kotoba compile kotoba/smtp/protocol_core.kotoba --target wasm -o protocol-core.wasm
 kotoba compile kotoba/smtp/protocol_core.cljk --target wasm -o protocol-core.wasm
 kotoba compile kotoba/smtp/protocol_core.kotoba --target web -o protocol-core.mjs
 ```
 
-Parity: `clojure -M:test` compiles the `.kotoba` object and checks it
-against `smtp.protocol` over the full SASL table. `clojure -M:test-pure`
-is the `.cljc` suite alone, with no compiler dependency.
+Parity: `clojure -M:test` compiles the `.kotoba` objects and checks them
+against `smtp.protocol` (full SASL table, and each command line).
+`clojure -M:test-pure` is the `.cljc` suite alone, with no compiler
+dependency. `.cljc` is not allowed to require `.kotoba`.
 
 ## RFC 5321 coverage
 

@@ -1,14 +1,15 @@
-;; RFC 5321 reply-class and SASL pick, as safe Kotoba.
+;; RFC 5321 reply-class and SASL pick, as a Kotoba fallback (ADR-2608261100).
 ;;
-;; The decision core of `smtp.protocol`: is this reply a success, does AUTH
-;; XOAUTH2 still have a round to finish, and which SASL mechanism to attempt.
-;; Command strings, response-line regex, base64 and the socket stay in .cljc
-;; -- those walk text, and the decisions are the same either way.
+;; Named backends still take only five scalar parameters here, so the SASL
+;; table is packed into integers. That is a backend gap, not the language's
+;; programming model and not the template for the rest of SMTP. Command
+;; construction — strings — is `kotoba/smtp/protocol_commands.{kotoba,cljk}`.
+;; Response-line regex, base64 and the socket stay in .cljc / the host.
 ;;
-;; The SASL table is the reason this is a core at all. `authenticate!` used to
-;; re-derive the preference inline; a second copy in Kotoba would drift in
-;; silence unless something compared them. The codes below are the wire
-;; between this file and `smtp.protocol/auth-pick`.
+;; The SASL table is the reason this core exists at all. `authenticate!`
+;; used to re-derive the preference inline; a second copy in Kotoba would
+;; drift in silence unless something compared them. The codes below are the
+;; wire between this file and `smtp.protocol/auth-pick`.
 ;;
 ;;   0 none           server advertised no AUTH (IP / client-cert is fine)
 ;;   1 XOAUTH2
