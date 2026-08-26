@@ -1,0 +1,85 @@
+;; SMTP reply-line structure as ordinary Kotoba values (ADR-2608261100).
+;;
+;; Product semantics: what a reply line MEANS. The socket, TLS and base64
+;; stay in the host — those are mechanism. Command construction is
+;; `kotoba/smtp/protocol_commands.{kotoba,cljk}`; the SASL pick is
+;; `protocol_core.{kotoba,cljk}`.
+;;
+;; The oracle scans with `re-matches #"(\d{3})([ -])(.*)"`. ADR-2608650000
+;; decision 6 says a design that depends on a regular expression gets the
+;; design change BEFORE the migration, rather than waiting for regex to be
+;; admitted. RFC 5321 4.2 fixes the first four octets of every reply line,
+;; so there is nothing to scan: characters 0-2 are the code, character 3 is
+;; the separator, the rest is text. The regex was never carrying its weight.
+;;
+;; Two shapes here are backend gaps, not the programming model:
+;;
+;;   1. Four scalar exports rather than one record. Measured 2026-08-26 on
+;;      amu dd943e08: a record as a RETURN type is refused — `Reply` and
+;;      `[:record Reply]` are read as a body expression ("function must
+;;      contain one result expression") and `:record` is "value type is
+;;      outside the safe profile". Records inside a function body are fine
+;;      (amu test/nbb/fixtures/computed-record-map.kotoba). Removal: when a
+;;      record can be named as a return type, these four collapse into one
+;;      `response-line` returning {:code :final? :text}, matching the oracle.
+;;   2. `digit` is a ten-way `cond` because there is no character type and
+;;      no parse-long. Removal: when a digit-value builtin is admitted.
+;;
+;; `.cljc` remains the oracle. This file is not required from
+;; `smtp.protocol` (require-graph). Clojure-shaped twin: protocol_response.cljk.
+;;
+;; Compile (the CLI needs -M and an ABSOLUTE source path):
+;;   kotoba -M compile /abs/kotoba/smtp/protocol_response.kotoba \
+;;     --target wasm32-browser --output response.wasm
+;;   kotoba -M compile /abs/kotoba/smtp/protocol_response.kotoba \
+;;     --target js-browser --output response.mjs
+
+(ns smtp.protocol-response
+  (:export [response-line? response-code response-final? response-text]))
+
+(defn- digit [line :string i :i64] :i64
+  (let [c (string-substring line i (+ i 1))]
+    (cond
+      (string=? c "0") 0
+      (string=? c "1") 1
+      (string=? c "2") 2
+      (string=? c "3") 3
+      (string=? c "4") 4
+      (string=? c "5") 5
+      (string=? c "6") 6
+      (string=? c "7") 7
+      (string=? c "8") 8
+      (string=? c "9") 9
+      :else -1)))
+
+(defn- three-digits? [line :string] :bool
+  (and (>= (digit line 0) 0)
+       (>= (digit line 1) 0)
+       (>= (digit line 2) 0)))
+
+(defn- separator? [line :string] :bool
+  (let [s (string-substring line 3 4)]
+    (or (string=? s " ") (string=? s "-"))))
+
+(defn response-line? [line :string] :bool
+  (and (>= (string-length line) 4)
+       (three-digits? line)
+       (separator? line)))
+
+(defn response-code [line :string] :i64
+  (if (response-line? line)
+    (+ (* (digit line 0) 100)
+       (* (digit line 1) 10)
+       (digit line 2))
+    -1))
+
+(defn response-final? [line :string] :bool
+  (if (response-line? line)
+    (let [sep (string-substring line 3 4)]
+      (string=? sep " "))
+    false))
+
+(defn response-text [line :string] :string
+  (if (response-line? line)
+    (string-substring line 4 (string-length line))
+    ""))

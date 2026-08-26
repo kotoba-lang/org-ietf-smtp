@@ -1,0 +1,61 @@
+;; Clojure-shaped twin of protocol_response.kotoba (:clj-kotoba / .cljk).
+;;
+;; Same positional parse, same `string=?` digit table. Type annotations are
+;; here because untyped comparison is not the guest ABI. `.cljk` is
+;; :clj-kotoba, not a JVM target.
+;;
+;; Compile (the CLI needs -M and an ABSOLUTE source path):
+;;   kotoba -M compile /abs/kotoba/smtp/protocol_response.cljk \
+;;     --target wasm32-browser --output response.wasm
+;;   kotoba -M compile /abs/kotoba/smtp/protocol_response.cljk \
+;;     --target js-browser --output response.mjs
+
+(ns smtp.protocol-response
+  (:export [response-line? response-code response-final? response-text]))
+
+(defn- digit [line :string i :i64] :i64
+  (let [c (string-substring line i (+ i 1))]
+    (cond
+      (string=? c "0") 0
+      (string=? c "1") 1
+      (string=? c "2") 2
+      (string=? c "3") 3
+      (string=? c "4") 4
+      (string=? c "5") 5
+      (string=? c "6") 6
+      (string=? c "7") 7
+      (string=? c "8") 8
+      (string=? c "9") 9
+      :else -1)))
+
+(defn- three-digits? [line :string] :bool
+  (and (>= (digit line 0) 0)
+       (>= (digit line 1) 0)
+       (>= (digit line 2) 0)))
+
+(defn- separator? [line :string] :bool
+  (let [s (string-substring line 3 4)]
+    (or (string=? s " ") (string=? s "-"))))
+
+(defn response-line? [line :string] :bool
+  (and (>= (string-length line) 4)
+       (three-digits? line)
+       (separator? line)))
+
+(defn response-code [line :string] :i64
+  (if (response-line? line)
+    (+ (* (digit line 0) 100)
+       (* (digit line 1) 10)
+       (digit line 2))
+    -1))
+
+(defn response-final? [line :string] :bool
+  (if (response-line? line)
+    (let [sep (string-substring line 3 4)]
+      (string=? sep " "))
+    false))
+
+(defn response-text [line :string] :string
+  (if (response-line? line)
+    (string-substring line 4 (string-length line))
+    ""))
