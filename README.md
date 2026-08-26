@@ -35,6 +35,23 @@ multi-line responses use `250-` for continuation, `250 ` for the last
 line) over an injected `Transport` (`test/smtp/fake_transport.cljc`, a
 scripted in-memory `Transport`).
 
+The judgements that do not walk text -- reply class (`positive?`), the
+XOAUTH2 334 trap, and the SASL pick -- also live as a Kotoba decision core
+in `kotoba/smtp/protocol_core.kotoba` (typed) and
+`kotoba/smtp/protocol_core.cljk` (Clojure-shaped). Command strings, regex,
+base64 and the socket stay in `.cljc`. Compile either source with the
+kotoba CLI:
+
+```sh
+kotoba compile kotoba/smtp/protocol_core.kotoba --target wasm -o protocol-core.wasm
+kotoba compile kotoba/smtp/protocol_core.cljk --target wasm -o protocol-core.wasm
+kotoba compile kotoba/smtp/protocol_core.kotoba --target web -o protocol-core.mjs
+```
+
+Parity: `clojure -M:test` compiles the `.kotoba` object and checks it
+against `smtp.protocol` over the full SASL table. `clojure -M:test-pure`
+is the `.cljc` suite alone, with no compiler dependency.
+
 ## RFC 5321 coverage
 
 | area | commands |
@@ -92,7 +109,8 @@ for that shape.
 ## Tests
 
 ```sh
-clojure -M:test
+clojure -M:test-pure   # .cljc only
+clojure -M:test        # plus Kotoba parity (needs git deps amu + kotoba-kir)
 ```
 
 No live server or network access required -- every `smtp.client` test

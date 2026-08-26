@@ -15,6 +15,19 @@
   (is (false? (p/positive? 550)))
   (is (false? (p/positive? nil))))
 
+(deftest xoauth2-continue-is-only-334
+  (is (true? (p/xoauth2-continue? 334)))
+  (is (false? (p/xoauth2-continue? 235)))
+  (is (false? (p/xoauth2-continue? 535))))
+
+(deftest auth-pick-distinguishes-empty-auth-from-unimplemented
+  (is (= p/auth-xoauth2 (p/auth-pick-from #{"XOAUTH2"} {:access-token "t"})))
+  (is (= p/auth-plain (p/auth-pick-from #{"PLAIN" "LOGIN"} {:password "pw"})))
+  (is (= p/auth-login (p/auth-pick-from #{"LOGIN"} {:password "pw"})))
+  (is (= p/auth-none (p/auth-pick-from #{} {:password "pw"})))
+  (is (= p/auth-unsupported (p/auth-pick-from #{"GSSAPI"} {:password "pw"}))
+      "GSSAPI-only is not the same as no AUTH line"))
+
 (deftest command-joins-parts-with-spaces-and-crlf-terminates
   (is (= "EHLO example.com\r\n" (p/command "EHLO" "example.com")))
   (is (= "QUIT\r\n" (p/command "QUIT")))

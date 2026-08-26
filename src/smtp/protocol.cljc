@@ -20,6 +20,62 @@
   [code]
   (boolean (and code (< code 400))))
 
+(defn xoauth2-continue?
+  "True when AUTH XOAUTH2 answered 334 rather than a status.
+
+  A rejected token does this; the protocol requires an empty line before
+  the real status arrives. Treating 334 as success reports a send that
+  never happened."
+  [code]
+  (= code 334))
+
+;; SASL pick codes. Mirrored by kotoba/smtp/protocol_core.{kotoba,cljk}.
+(def auth-none 0)
+(def auth-xoauth2 1)
+(def auth-plain 2)
+(def auth-login 3)
+(def auth-unsupported 4)
+
+(defn creds-code
+  "Pack token/password presence into one integer the Kotoba core can take.
+
+  0 neither, 1 token, 2 password, 3 both. `auth-pick` already spends four
+  parameters on the advertised mechanisms, and the compiler's
+  max-parameters is 5."
+  [has-token? has-password?]
+  (if has-token?
+    (if has-password? 3 1)
+    (if has-password? 2 0)))
+
+(defn auth-pick
+  "Which SASL mechanism to attempt, given only scalars.
+
+  `n-advertised` is how many mechanisms the EHLO AUTH line named, including
+  ones this client does not implement. Zero means the server named none,
+  which is not an error: some submission servers authenticate by IP or
+  client certificate.
+
+  Returns 0 none, 1 XOAUTH2, 2 PLAIN, 3 LOGIN, 4 unsupported. Same table
+  as `kotoba/smtp/protocol_core.kotoba`."
+  [n-advertised has-xoauth2? has-plain? has-login? creds]
+  (let [has-token? (or (= creds 1) (= creds 3))
+        has-password? (or (= creds 2) (= creds 3))]
+    (cond
+      (and has-xoauth2? has-token?) auth-xoauth2
+      (and has-plain? has-password?) auth-plain
+      (and has-login? has-password?) auth-login
+      (pos? n-advertised) auth-unsupported
+      :else auth-none)))
+
+(defn auth-pick-from
+  "auth-pick over the set `authenticate!` already holds."
+  [mechanisms {:keys [access-token password]}]
+  (auth-pick (count mechanisms)
+             (contains? mechanisms "XOAUTH2")
+             (contains? mechanisms "PLAIN")
+             (contains? mechanisms "LOGIN")
+             (creds-code (boolean access-token) (boolean password))))
+
 (defn command
   "One CRLF-terminated command line, e.g. (command \"EHLO\" domain) ->
   \"EHLO example.com\\r\\n\", (command \"QUIT\") -> \"QUIT\\r\\n\"."

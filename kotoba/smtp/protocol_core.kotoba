@@ -1,0 +1,56 @@
+;; RFC 5321 reply-class and SASL pick, as safe Kotoba.
+;;
+;; The decision core of `smtp.protocol`: is this reply a success, does AUTH
+;; XOAUTH2 still have a round to finish, and which SASL mechanism to attempt.
+;; Command strings, response-line regex, base64 and the socket stay in .cljc
+;; -- those walk text, and the decisions are the same either way.
+;;
+;; The SASL table is the reason this is a core at all. `authenticate!` used to
+;; re-derive the preference inline; a second copy in Kotoba would drift in
+;; silence unless something compared them. The codes below are the wire
+;; between this file and `smtp.protocol/auth-pick`.
+;;
+;;   0 none           server advertised no AUTH (IP / client-cert is fine)
+;;   1 XOAUTH2
+;;   2 PLAIN
+;;   3 LOGIN
+;;   4 unsupported    advertised only mechanisms this client does not implement
+;;
+;; `creds` packs the caller's secrets so the pick stays inside max-parameters
+;; (5): 0 neither, 1 token, 2 password, 3 both.
+;;
+;; Checked against `smtp.protocol` in test/smtp/protocol_kotoba_parity_test.clj.
+;;
+;; Clojure-shaped twin: `protocol_core.cljk`. Compile either with
+;; `kotoba compile kotoba/smtp/protocol_core.kotoba --target wasm -o core.wasm`
+;; `kotoba compile kotoba/smtp/protocol_core.cljk --target wasm -o core.wasm`
+
+(ns smtp.protocol-core
+  (:export [positive? xoauth2-continue? auth-pick
+            auth-none auth-xoauth2 auth-plain auth-login auth-unsupported]))
+
+(defn auth-none [] :i64 0)
+(defn auth-xoauth2 [] :i64 1)
+(defn auth-plain [] :i64 2)
+(defn auth-login [] :i64 3)
+(defn auth-unsupported [] :i64 4)
+
+(defn positive? [code :i64] :bool
+  (< code 400))
+
+(defn xoauth2-continue? [code :i64] :bool
+  (= code 334))
+
+(defn- has-token? [creds :i64] :bool
+  (or (= creds 1) (= creds 3)))
+
+(defn- has-password? [creds :i64] :bool
+  (or (= creds 2) (= creds 3)))
+
+(defn auth-pick
+  [n-advertised :i64 has-xoauth2 :bool has-plain :bool has-login :bool creds :i64]
+  :i64
+  (if (and has-xoauth2 (has-token? creds)) (auth-xoauth2)
+      (if (and has-plain (has-password? creds)) (auth-plain)
+          (if (and has-login (has-password? creds)) (auth-login)
+              (if (> n-advertised 0) (auth-unsupported) (auth-none))))))
