@@ -33,6 +33,21 @@
   (is (= "QUIT\r\n" (p/command "QUIT")))
   (is (= "MAIL FROM:<a@b.com>\r\n" (p/command "MAIL" "FROM:<a@b.com>"))))
 
+(deftest named-command-lines-are-the-session-verbs
+  (is (= (p/command "EHLO" "example.com") (p/ehlo-line "example.com")))
+  (is (= (p/command "STARTTLS") (p/starttls-line)))
+  (is (= (p/command "MAIL" "FROM:<a@b.com>") (p/mail-from-line "a@b.com")))
+  (is (= (p/command "RCPT" "TO:<b@c.com>") (p/rcpt-to-line "b@c.com")))
+  (is (= (p/command "DATA") (p/data-line)))
+  (is (= (p/command "RSET") (p/rset-line)))
+  (is (= (p/command "NOOP") (p/noop-line)))
+  (is (= (p/command "QUIT") (p/quit-line)))
+  (is (= (p/command "AUTH" "LOGIN") (p/auth-login-line)))
+  (is (= (p/command "AUTH" "PLAIN" "abc") (p/auth-plain-line "abc")))
+  (is (= (p/command "AUTH" "XOAUTH2" "tok") (p/auth-xoauth2-line "tok")))
+  (is (= "dXNlcg==\r\n" (p/payload-line "dXNlcg==")))
+  (is (= "\r\n" (p/empty-line))))
+
 (deftest dot-stuff-doubles-leading-dots-and-appends-the-terminator
   (is (= "hello\r\n.\r\n" (p/dot-stuff "hello")))
   (is (= "..leading dot\r\nplain\r\n.\r\n" (p/dot-stuff ".leading dot\nplain")))

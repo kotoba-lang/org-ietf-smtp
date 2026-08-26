@@ -82,6 +82,30 @@
   [& parts]
   (str (str/join " " (remove nil? parts)) "\r\n"))
 
+;; Named command lines. These are product semantics (what the session says),
+;; not I/O. `smtp.client` writes them; the socket stays in `smtp.transport`.
+;; The same builders live as a Kotoba guest in
+;; `kotoba/smtp/protocol_commands.{kotoba,cljk}` — strings and `->`, not a
+;; judgement table. `.cljc` remains the oracle until a guest can be loaded
+;; without requiring `.kotoba` from here.
+
+(defn ehlo-line [domain] (command "EHLO" domain))
+(defn starttls-line [] (command "STARTTLS"))
+(defn mail-from-line [mailbox] (command "MAIL" (str "FROM:<" mailbox ">")))
+(defn rcpt-to-line [mailbox] (command "RCPT" (str "TO:<" mailbox ">")))
+(defn data-line [] (command "DATA"))
+(defn rset-line [] (command "RSET"))
+(defn noop-line [] (command "NOOP"))
+(defn quit-line [] (command "QUIT"))
+(defn auth-login-line [] (command "AUTH" "LOGIN"))
+(defn auth-plain-line [payload] (command "AUTH" "PLAIN" payload))
+(defn auth-xoauth2-line [payload] (command "AUTH" "XOAUTH2" payload))
+(defn payload-line
+  "CRLF-terminate an already-built payload (AUTH LOGIN user/pass, XOAUTH2 empty)."
+  [s]
+  (str s "\r\n"))
+(defn empty-line [] "\r\n")
+
 (defn dot-stuff
   "RFC 5321 4.5.2 transparency: double any line in `text` that begins with
   a '.', then append the DATA terminator (\"\\r\\n.\\r\\n\"). `text` may

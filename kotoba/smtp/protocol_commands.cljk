@@ -1,0 +1,55 @@
+;; Clojure-shaped twin of protocol_commands.kotoba (:clj-kotoba / .cljk).
+;;
+;; Same strings, same `string-concat` lowering (`str` is not admitted yet).
+;; Type annotations are here because untyped concat is not the guest ABI.
+;;
+;; Compile:
+;;   kotoba compile kotoba/smtp/protocol_commands.cljk --target wasm -o commands.wasm
+;;   kotoba compile kotoba/smtp/protocol_commands.cljk --target web  -o commands.mjs
+
+(ns smtp.protocol-commands
+  (:export [ehlo-line starttls-line mail-from-line rcpt-to-line
+            data-line rset-line noop-line quit-line
+            auth-login-line auth-plain-line auth-xoauth2-line
+            payload-line empty-line]))
+
+(defn- line [s :string] :string
+  (string-concat s "\r\n"))
+
+(defn empty-line [] :string "\r\n")
+
+(defn payload-line [s :string] :string
+  (line s))
+
+(defn ehlo-line [domain :string] :string
+  (line (string-concat "EHLO " domain)))
+
+(defn starttls-line [] :string
+  (line "STARTTLS"))
+
+(defn mail-from-line [mailbox :string] :string
+  (line (string-concat "MAIL FROM:<" (string-concat mailbox ">"))))
+
+(defn rcpt-to-line [mailbox :string] :string
+  (line (string-concat "RCPT TO:<" (string-concat mailbox ">"))))
+
+(defn data-line [] :string
+  (line "DATA"))
+
+(defn rset-line [] :string
+  (line "RSET"))
+
+(defn noop-line [] :string
+  (line "NOOP"))
+
+(defn quit-line [] :string
+  (line "QUIT"))
+
+(defn auth-login-line [] :string
+  (line "AUTH LOGIN"))
+
+(defn auth-plain-line [payload :string] :string
+  (line (string-concat "AUTH PLAIN " payload)))
+
+(defn auth-xoauth2-line [payload :string] :string
+  (line (string-concat "AUTH XOAUTH2 " payload)))

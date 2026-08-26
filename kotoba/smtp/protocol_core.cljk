@@ -1,5 +1,8 @@
 ;; Clojure-shaped twin of protocol_core.kotoba (:clj-kotoba / .cljk).
 ;;
+;; Fallback: SASL pick as scalars because max-parameters is 5. Command
+;; strings are protocol_commands.cljk, not this file.
+;;
 ;; The body keeps the same `and`/`or`/`if` as the .cljc oracle. Type
 ;; annotations are here because untyped `or` of two `=` is i64 (the css
 ;; port measured this) and `if` then sees two branch types. That is a
