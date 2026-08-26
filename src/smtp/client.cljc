@@ -131,7 +131,7 @@
   (let [resp (send-line! session
                          (p/command "AUTH" "XOAUTH2"
                                     (p/base64 (p/xoauth2-credentials user access-token))))]
-    (if (= 334 (:code resp))
+    (if (p/xoauth2-continue? (:code resp))
       (let [final (send-line! session "\r\n")]
         (assert-positive! final "AUTH XOAUTH2")
         session)
@@ -144,20 +144,15 @@
   Order: XOAUTH2 when a token was given, then PLAIN, then LOGIN. A caller
   that knows which one it wants can still call it directly; this exists so
   the ordinary case does not require every caller to re-derive the same
-  preference from `:auth-mechanisms`."
-  [session {:keys [user password access-token]}]
-  (let [mechanisms (:auth-mechanisms session #{})]
+  preference from `:auth-mechanisms`. The pick itself is `smtp.protocol/auth-pick`."
+  [session {:keys [user password access-token] :as creds}]
+  (let [mechanisms (:auth-mechanisms session #{})
+        pick (p/auth-pick-from mechanisms creds)]
     (cond
-      (and access-token (contains? mechanisms "XOAUTH2"))
-      (auth-xoauth2! session user access-token)
-
-      (and password (contains? mechanisms "PLAIN")) (auth-plain! session user password)
-      (and password (contains? mechanisms "LOGIN")) (auth-login! session user password)
-
-      ;; No AUTH line at all: some submission servers authenticate by IP or
-      ;; by client certificate, and refusing to proceed would break them.
-      (empty? mechanisms) session
-
+      (= pick p/auth-xoauth2) (auth-xoauth2! session user access-token)
+      (= pick p/auth-plain) (auth-plain! session user password)
+      (= pick p/auth-login) (auth-login! session user password)
+      (= pick p/auth-none) session
       :else
       (throw (ex-info "この SMTP サーバーが受け付ける認証方式に対応していません。"
                       {:type :smtp/no-supported-mechanism

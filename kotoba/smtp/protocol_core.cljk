@@ -1,0 +1,40 @@
+;; Clojure-shaped twin of protocol_core.kotoba (:clj-kotoba / .cljk).
+;;
+;; The body keeps the same `and`/`or`/`if` as the .cljc oracle. Type
+;; annotations are here because untyped `or` of two `=` is i64 (the css
+;; port measured this) and `if` then sees two branch types. That is a
+;; compiler fact, not a reason to rewrite the table as nested `if`.
+;;
+;; Compile:
+;;   kotoba compile kotoba/smtp/protocol_core.cljk --target wasm -o core.wasm
+;;   kotoba compile kotoba/smtp/protocol_core.cljk --target web -o core.mjs
+
+(ns smtp.protocol-core
+  (:export [positive? xoauth2-continue? auth-pick
+            auth-none auth-xoauth2 auth-plain auth-login auth-unsupported]))
+
+(defn auth-none [] :i64 0)
+(defn auth-xoauth2 [] :i64 1)
+(defn auth-plain [] :i64 2)
+(defn auth-login [] :i64 3)
+(defn auth-unsupported [] :i64 4)
+
+(defn positive? [code :i64] :bool
+  (< code 400))
+
+(defn xoauth2-continue? [code :i64] :bool
+  (= code 334))
+
+(defn- has-token? [creds :i64] :bool
+  (or (= creds 1) (= creds 3)))
+
+(defn- has-password? [creds :i64] :bool
+  (or (= creds 2) (= creds 3)))
+
+(defn auth-pick
+  [n-advertised :i64 has-xoauth2 :bool has-plain :bool has-login :bool creds :i64]
+  :i64
+  (if (and has-xoauth2 (has-token? creds)) (auth-xoauth2)
+      (if (and has-plain (has-password? creds)) (auth-plain)
+          (if (and has-login (has-password? creds)) (auth-login)
+              (if (> n-advertised 0) (auth-unsupported) (auth-none))))))

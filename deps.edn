@@ -3,10 +3,31 @@
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
-                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+                      ;; TEST-ONLY. Parity compiles kotoba/smtp/protocol_core.kotoba
+                      ;; and runs it against smtp.protocol. Nothing in :paths
+                      ;; depends on either of these.
+                      ;;
+                      ;; Pins are the west pair (amu + kotoba-kir) as of this
+                      ;; commit; they are advanced together.
+                      io.github.kotoba-lang/amu
+                      {:git/url "https://github.com/kotoba-lang/amu.git"
+                       :git/sha "dd943e084e8189f4b399b51fe88f1227baba5b1e"}
+                      io.github.kotoba-lang/kotoba-kir
+                      {:git/url "https://github.com/kotoba-lang/kotoba-kir.git"
+                       :git/sha "fdf407a6645d7d35af8b6fd8ffb69d948bfe2aa8"}}
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test}
-  ;; clj-kondo as a Clojars lib (no Homebrew/system install needed).
+
+  ;; The .cljc suite alone, with no compiler dependency.
+  :test-pure
+  {:extra-paths ["test"]
+   :extra-deps {io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner"
+               "-n" "smtp.protocol-test"
+               "-n" "smtp.client-test"]}
+
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
          :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"
                      "--fail-level" "error"]}}}
