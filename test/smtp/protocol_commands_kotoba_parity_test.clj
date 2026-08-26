@@ -87,24 +87,41 @@
 (defn- kotoba-bin []
   (or (System/getenv "KOTOBA") "kotoba"))
 
+(defn- kotoba-runnable?
+  "Whether the CLI can be EXECUTED, not whether a name resolves on PATH.
+
+  Measured 2026-08-26: `which kotoba` answered yes for a two-line shim
+  whose exec target had been cleaned out of /tmp. The shell then exited
+  126 and this test reported a compile failure that was really an absent
+  toolchain — sixteen red assertions across this repository's suite for a
+  host fact the docstring says should skip. Run it and read the exit code."
+  []
+  (try (zero? (:exit (shell/sh (kotoba-bin) "--help")))
+       (catch Exception _ false)))
+
 (deftest kotoba-cli-compiles-command-sources
-  "The public compile path is `kotoba compile`, not compiler/compile-source.
-  Skip rather than fail if the binary is absent — that is a host fact, not
-  a disagreement between the two implementations."
+  "The public compile path is the CLI. `-M` is the execution boundary the
+  current CLI requires, the wasm target is `wasm32-browser`, the flag is
+  `--output`, and the source path must be absolute — a relative path comes
+  back `:decode` / \"input could not be read\". Skip rather than fail when
+  no runnable binary is present: that is a host fact, not a disagreement
+  between the two implementations."
   (when (source-available?)
-    (if (zero? (:exit (shell/sh "which" (kotoba-bin))))
+    (if (kotoba-runnable?)
       (let [dir (io/file (System/getProperty "java.io.tmpdir")
                          (str "smtp-commands-" (System/nanoTime)))]
         (.mkdirs dir)
         (doseq [[label src]
                 [["kotoba" kotoba-file]
                  ["cljk" cljk-file]]
-                target ["wasm" "web"]
-                :let [out (io/file dir (str label "-" target
-                                            (if (= target "wasm") ".wasm" ".mjs")))
-                      result (shell/sh (kotoba-bin) "compile" (.getPath src)
-                                       "--target" target "-o" (.getPath out))]]
+                [target ext] [["wasm32-browser" ".wasm"] ["js-browser" ".mjs"]]
+                :let [out (io/file dir (str label "-" target ext))
+                      result (shell/sh (kotoba-bin) "-M" "compile"
+                                       (.getAbsolutePath src)
+                                       "--target" target
+                                       "--output" (.getAbsolutePath out))]]
           (is (zero? (:exit result))
-              (str label " --target " target "\n" (:err result) (:out result)))
+              (str label " -M compile --target " target "\n" (:err result) (:out result)))
           (is (.isFile out) (str label " " target " emitted nothing"))))
-      (println "SKIP kotoba-cli-compiles-command-sources: no kotoba on PATH"))))
+      (println "SKIP kotoba-cli-compiles-command-sources: no runnable"
+               (kotoba-bin) "— set KOTOBA to a working CLI"))))
