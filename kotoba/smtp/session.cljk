@@ -1,6 +1,6 @@
 ;; Clojure-shaped twin of session.kotoba (:clj-kotoba / .cljk).
 ;;
-;; Same transaction, same three linked modules, same inert `:out` effect.
+;; Same transaction, same four linked modules, same inert `:out` effect.
 ;; Type annotations are here because an untyped document walk is not the
 ;; guest ABI. `.cljk` is :clj-kotoba, not a JVM target.
 ;;
@@ -16,10 +16,11 @@
 ;;     --blocks /ABS/target/blocks --target js-browser --output session.mjs
 
 (ns smtp.session
-  (:require [smtp.protocol-commands :as cmd]
+  (:require [smtp.message :as message]
+            [smtp.protocol-commands :as cmd]
             [smtp.protocol-core :as core]
             [smtp.protocol-response :as resp])
-  (:export [init add-recipient start step closed
+  (:export [init start step closed
             phase outgoing error-text
             accepted-count accepted-at
             rejected-count rejected-recipient-at rejected-code-at
@@ -47,11 +48,11 @@
 
 ;; --- state constructors ---------------------------------------------------
 
-(defn init [from :string payload :string] :document
+(defn init [msg :document] :document
   (document-map :phase (document-keyword :ready)
-                :from (document-string from)
-                :payload (document-string payload)
-                :rcpts (document-vector)
+                :from (document-string (ds msg :from))
+                :payload (document-string (message/payload msg))
+                :rcpts (message/recipients msg)
                 :i (document-i64 0)
                 :accepted (document-vector)
                 :rejected (document-vector)
@@ -74,25 +75,7 @@
     :error (document-string message))
    :out (document-string "")))
 
-;; --- recipients -----------------------------------------------------------
-
-;; `recipients-of` in the oracle drops nils and de-duplicates across
-;; :to/:cc/:bcc; a caller that names the same address twice must not make the
-;; server see two RCPT TO for it.
-(defn- has-from? [v :document i :i64 s :string] :bool
-  (cond
-    (>= i (document-count v)) false
-    (string=? (at-str v i) s) true
-    :else (has-from? v (+ i 1) s)))
-
-(defn add-recipient [state :document mailbox :string] :document
-  (cond
-    (not (= (dk state :phase) :ready)) state
-    (string=? mailbox "") state
-    (has-from? (dg state :rcpts) 0 mailbox) state
-    :else (document-assoc state :rcpts
-                          (document-vector-conj (dg state :rcpts)
-                                                (document-string mailbox)))))
+;; --- starting the transaction ---------------------------------------------
 
 (defn start [state :document] :document
   (cond
