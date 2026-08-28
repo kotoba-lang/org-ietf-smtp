@@ -35,26 +35,53 @@ multi-line responses use `250-` for continuation, `250 ` for the last
 line) over an injected `Transport` (`test/smtp/fake_transport.cljc`, a
 scripted in-memory `Transport`).
 
-The SASL pick that does not walk text — reply class (`positive?`), the
-XOAUTH2 334 trap, and which mechanism to attempt — also lives as a Kotoba
-**fallback** in `kotoba/smtp/protocol_core.kotoba` (and `.cljk`). That core
-is packed into integers because the named backend's max-parameters is 5;
-it is not the template for SMTP. Command construction is ordinary Kotoba
-strings in `kotoba/smtp/protocol_commands.{kotoba,cljk}` (EHLO, MAIL FROM,
-RCPT TO, AUTH, DATA, QUIT). Regex parse, base64 and the socket stay in
-`.cljc` / the host. Compile with the kotoba CLI:
+## The Kotoba guest
+
+`kotoba/smtp/` holds the protocol's product semantics as Kotoba, each file
+with a Clojure-shaped `.cljk` twin. Four modules, linked as one closed
+graph (amu ADR 0005) rather than copied into each other:
+
+| module | what it owns |
+|---|---|
+| `session` | the mail transaction: MAIL FROM, one RCPT TO per recipient, DATA, the body. `init` / `add-recipient` / `start` / `step` / `outgoing` — state in, one reply line in, next state and one inert line out. |
+| `protocol_commands` | the command lines themselves (EHLO, MAIL FROM, RCPT TO, AUTH, DATA, QUIT). |
+| `protocol_response` | reply-line structure (code, continuation, text) and RFC 3463 enhanced status, both parsed positionally rather than by regex. |
+| `protocol_core` | reply class and the SASL pick, packed into integers. A **fallback**, because the named backend's max-parameters is 5 — not the template for the rest of SMTP. |
+
+The socket, TLS, base64 and message composition stay in `.cljc` / the host.
+`throw` is not in the language, so the transaction's five `ex-info` sites
+become a `:failed` phase with the same message text.
+
+Compile with the kotoba CLI. It needs `-M`, an **absolute** source path,
+`--target wasm32-browser` or `js-browser` (not `wasm`/`web`), and
+`--output` (not `-o`) — each of the four is a different error:
 
 ```sh
-kotoba compile kotoba/smtp/protocol_commands.kotoba --target wasm -o commands.wasm
-kotoba compile kotoba/smtp/protocol_commands.cljk --target wasm -o commands.wasm
-kotoba compile kotoba/smtp/protocol_commands.kotoba --target web -o commands.mjs
-kotoba compile kotoba/smtp/protocol_core.kotoba --target wasm -o protocol-core.wasm
-kotoba compile kotoba/smtp/protocol_core.cljk --target wasm -o protocol-core.wasm
-kotoba compile kotoba/smtp/protocol_core.kotoba --target web -o protocol-core.mjs
+kotoba -M compile "$PWD/kotoba/smtp/protocol_commands.kotoba" \
+  --target wasm32-browser --output commands.wasm
+kotoba -M compile "$PWD/kotoba/smtp/protocol_response.kotoba" \
+  --target js-browser --output response.mjs
+```
+
+`session` is a multi-module graph, so it is pinned first and compiled from
+the lock. That route reaches `js-browser` and not `wasm32-browser` today
+(measured 2026-08-28 on amu 82c7e064); in-process linking does both, so the
+ceiling is CLI routing, and the parity test asserts the refusal so it goes
+red when it is fixed:
+
+```sh
+kotoba -M module-lock "$PWD/kotoba/smtp/session.kotoba" \
+  --source-path "$PWD/kotoba" --blocks target/blocks \
+  --output target/kotoba.modules.edn
+kotoba -M compile --module-lock target/kotoba.modules.edn \
+  --blocks target/blocks --target js-browser --output session.mjs
 ```
 
 Parity: `clojure -M:test` compiles the `.kotoba` objects and checks them
-against `smtp.protocol` (full SASL table, and each command line).
+against `smtp.protocol` and `smtp.client` — the full SASL table, each
+command line, every reply line, and the whole transaction driven from the
+same scripts as the oracle. Set `KOTOBA` to a runnable CLI to include the
+compile legs; without one they print `SKIP` rather than passing quietly.
 `clojure -M:test-pure` is the `.cljc` suite alone, with no compiler
 dependency. `.cljc` is not allowed to require `.kotoba`.
 

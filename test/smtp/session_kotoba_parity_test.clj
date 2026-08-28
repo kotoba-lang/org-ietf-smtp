@@ -1,0 +1,399 @@
+;; `kotoba/smtp/session.kotoba` against `smtp.client/send-mail!`.
+;;
+;; The slice is the mail transaction: MAIL FROM, one RCPT TO per recipient,
+;; DATA, the body. The guest is an application — state in, one reply line in,
+;; next state and one inert line out — so the oracle and the guest are driven
+;; by the SAME script and compared on what went on the wire, which recipients
+;; were accepted, which were refused, and what a failure says.
+;;
+;; Message composition stays in `.cljc` for now, so the body is built with
+;; `mime-message`/`dot-stuff` and handed to `init` as a value. That is the
+;; declared edge of this slice, not a claim that composition belongs on the
+;; host.
+;;
+;; `.cljc` stays the oracle and is not required from the guest
+;; (require-graph). Nothing but this file notices the two drifting apart.
+;;
+;; The negative control is `partial-refusal-must-not-become-total-failure`:
+;; the one rule in `send-mail!`'s docstring that a careless port loses.
+
+(ns smtp.session-kotoba-parity-test
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [kotoba.compiler.core :as compiler]
+            [kotoba.kir :as ir]
+            [smtp.client :as client]
+            [smtp.fake-transport :as fake]
+            [smtp.protocol :as p]))
+
+(def ^:private guest-dir
+  (io/file (System/getProperty "user.dir") "kotoba" "smtp"))
+
+(def ^:private modules
+  '{smtp.protocol-commands "protocol_commands"
+    smtp.protocol-core "protocol_core"
+    smtp.protocol-response "protocol_response"
+    smtp.session "session"})
+
+(defn- source-map [ext]
+  (into {} (map (fn [[ns base]]
+                  [ns (slurp (io/file guest-dir (str base "." ext)))]))
+        modules))
+
+(defn- sources-available? []
+  (every? (fn [[_ base]]
+            (let [f (io/file guest-dir (str base ".kotoba"))
+                  t (io/file guest-dir (str base ".cljk"))]
+              (and (is (.exists f) (str "kotoba object not found at " f))
+                   (is (.exists t) (str "cljk object not found at " t)))))
+          modules))
+
+(def ^:private kir
+  (delay (:kir (compiler/compile-project (source-map "kotoba") 'smtp.session
+                                         :wasm32-kotoba-v1))))
+
+(def ^:private cljk-kir
+  (delay (:kir (compiler/compile-project (source-map "cljk") 'smtp.session
+                                         :wasm32-kotoba-v1))))
+
+;; --- driving the two implementations ---------------------------------------
+
+(defn- call [compiled f args] (ir/execute compiled f args))
+
+(defn- projections
+  "Everything the transaction decided, read back through the exports."
+  [compiled state written]
+  {:phase (call compiled 'phase [state])
+   :written written
+   :error (call compiled 'error-text [state])
+   :accepted (mapv #(call compiled 'accepted-at [state %])
+                   (range (call compiled 'accepted-count [state])))
+   :rejected (mapv (fn [i]
+                     {:recipient (call compiled 'rejected-recipient-at [state i])
+                      :code (call compiled 'rejected-code-at [state i])
+                      :status (call compiled 'rejected-status-at [state i])
+                      :text (call compiled 'rejected-text-at [state i])})
+                   (range (call compiled 'rejected-count [state])))})
+
+(defn- guest-run
+  "Drive the guest with `script`, one reply line per `step`.
+
+  `recipients` arrives with its duplicates intact — the oracle de-duplicates
+  in `recipients-of` and the guest in `add-recipient`, and a caller naming
+  the same address twice must not make the server see two RCPT TO for it.
+
+  A script that runs out before the transaction finishes is EOF, which is
+  what `closed` is for."
+  [compiled from payload recipients script]
+  (let [start (reduce (fn [s r] (call compiled 'add-recipient [s r]))
+                      (call compiled 'init [from payload])
+                      recipients)]
+    (loop [state (call compiled 'start [start])
+           lines script
+           written []]
+      (let [out (call compiled 'outgoing [state])
+            written (cond-> written (not= "" out) (conj out))
+            phase (call compiled 'phase [state])]
+        (cond
+          (contains? #{:done :failed} phase) (projections compiled state written)
+          (empty? lines) (projections compiled (call compiled 'closed [state]) written)
+          :else (recur (call compiled 'step [state (first lines)])
+                       (rest lines)
+                       written))))))
+
+(defn- oracle-run
+  "`send-mail!` over the same script. `ex-info` becomes `:error`, which is
+  what the guest's `:failed` phase carries instead."
+  [from msg script]
+  (let [{:keys [transport written]} (fake/make (cons "220 ready" script))
+        session (assoc (client/connect! "smtp.example.com" {:transport transport})
+                       :from from)]
+    (try
+      (let [result (client/send-mail! session msg)]
+        {:phase :done
+         :written @written
+         :error ""
+         :carries-results? true
+         :accepted (vec (:accepted result))
+         :rejected (mapv #(select-keys % [:recipient :code :status :text])
+                         (:rejected result))})
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          {:phase :failed
+           :written @written
+           :error (.getMessage e)
+           ;; Only the all-recipients-refused throw builds its ex-data from
+           ;; the results; MAIL FROM, DATA and the body throw with the reply
+           ;; alone, so the oracle has no accepted list to compare against.
+           :carries-results? (contains? data :accepted)
+           :accepted (vec (:accepted data))
+           :rejected (mapv #(select-keys % [:recipient :code :status :text])
+                           (:rejected data))})))))
+
+(defn- oracle-normalised
+  "The oracle answers nil for an absent enhanced status; the guest has no nil
+  and answers \"\". Normalise the oracle rather than teaching the guest a
+  second empty value."
+  [run]
+  (update run :rejected (fn [rs] (mapv #(update % :status (fnil identity "")) rs))))
+
+;; --- the scripts ------------------------------------------------------------
+
+(def ^:private from "me@example.com")
+
+(defn- payload-for [msg]
+  (p/dot-stuff (or (:raw msg) (p/mime-message (assoc msg :from from)))))
+
+;; {:msg …} is what the oracle is asked to send; :recipients is the same list
+;; with its duplicates, in the order `recipients-of` produces them.
+(def ^:private cases
+  [{:name "one recipient, everything accepted"
+    :msg {:to "friend@example.com" :subject "hi" :body "hello"}
+    :recipients ["friend@example.com"]
+    :script ["250 OK" "250 OK" "354 go ahead" "250 queued as ABC"]}
+
+   {:name "three recipients are one transaction, and a repeat is not a fourth"
+    :msg {:to ["a@example.com" "b@example.com"] :cc ["c@example.com" "a@example.com"]
+          :subject "s" :body "hi"}
+    :recipients ["a@example.com" "b@example.com" "c@example.com" "a@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "250 RCPT OK"
+             "354 go ahead" "250 queued"]}
+
+   {:name "bcc is a recipient and never a header"
+    :msg {:to "a@example.com" :bcc "secret@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com" "secret@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "354 go" "250 queued"]}
+
+   {:name "a refused recipient keeps the mail that did go out"
+    :msg {:to ["good@example.com" "gone@example.com"] :subject "s" :body "hi"}
+    :recipients ["good@example.com" "gone@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "550 5.1.1 No such user here"
+             "354 go ahead" "250 queued"]}
+
+   {:name "every recipient refused is a real failure"
+    :msg {:to ["gone@example.com" "also-gone@example.com"] :subject "s" :body "hi"}
+    :recipients ["gone@example.com" "also-gone@example.com"]
+    :script ["250 MAIL OK" "550 5.1.1 No such user" "551 5.1.6 User has moved"]}
+
+   {:name "no recipient is refused before MAIL FROM"
+    :msg {:subject "s" :body "hi"}
+    :recipients []
+    :script []}
+
+   {:name "MAIL FROM refused"
+    :msg {:to "a@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com"]
+    :script ["550 5.7.1 Sender address rejected"]}
+
+   {:name "DATA refused"
+    :msg {:to "a@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "552 5.3.4 Message too big"]}
+
+   {:name "the body itself refused at end-of-DATA"
+    :msg {:to "a@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "354 go" "554 5.7.1 Message rejected"]}
+
+   {:name "a multi-line refusal keeps every line of its text"
+    :msg {:to "gone@example.com" :subject "s" :body "hi"}
+    :recipients ["gone@example.com"]
+    :script ["250 MAIL OK"
+             "550-5.1.1 The email account that you tried to reach"
+             "550-5.1.1 does not exist. Please try double-checking"
+             "550 5.1.1 the recipient's email address."]}
+
+   {:name "an unparseable reply line"
+    :msg {:to "a@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com"]
+    :script ["this is not an SMTP reply"]}
+
+   {:name "the connection closes mid-transaction"
+    :msg {:to "a@example.com" :subject "s" :body "hi"}
+    :recipients ["a@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK"]}
+
+   {:name "a prebuilt raw message"
+    :msg {:to "a@example.com" :raw "Subject: =?UTF-8?B?5pel?=\r\n\r\nbody"}
+    :recipients ["a@example.com"]
+    :script ["250 MAIL OK" "250 RCPT OK" "354 go" "250 queued"]}])
+
+;; --- the tests --------------------------------------------------------------
+
+(deftest kotoba-session-objects-are-present
+  (sources-available?))
+
+(deftest the-transaction-agrees-with-the-cljc-oracle
+  (when (sources-available?)
+    (doseq [{:keys [name msg recipients script]} cases]
+      (testing name
+        (let [oracle (oracle-normalised (oracle-run from msg script))
+              guest (guest-run @kir from (payload-for msg) recipients script)]
+          (if (:carries-results? oracle)
+            (is (= (dissoc oracle :carries-results?) guest))
+            ;; The oracle threw with the reply alone, so it has no accepted
+            ;; list here. What it DOES carry still has to agree; the missing
+            ;; part is `a-failure-after-rcpt-still-knows-who-was-accepted`.
+            (is (= (dissoc oracle :carries-results? :accepted :rejected)
+                   (dissoc guest :accepted :rejected)))))))))
+
+(deftest a-failure-after-rcpt-still-knows-who-was-accepted
+  "A difference the guest is on the right side of, asserted rather than
+  normalised away.
+
+  `send-mail!` throws on a DATA failure with the reply map as ex-data, so
+  the caller is told the send failed and NOT that the server had already
+  accepted the recipients. That matters on the retry: the accepted list is
+  the difference between resending one message and not knowing whether a
+  second copy is about to go out. The guest's state is a value, so a failure
+  cannot erase what earlier steps established."
+  (when (sources-available?)
+    (let [msg {:to ["a@example.com" "b@example.com"] :subject "s" :body "hi"}
+          script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "552 5.3.4 Message too big"]
+          oracle (oracle-run from msg script)
+          guest (guest-run @kir from (payload-for msg)
+                           ["a@example.com" "b@example.com"] script)]
+      (is (= :failed (:phase oracle)))
+      (is (= :failed (:phase guest)))
+      (is (= (:error oracle) (:error guest)) "and they agree on why")
+      (is (false? (:carries-results? oracle))
+          "the oracle discards the results on this throw")
+      (is (= ["a@example.com" "b@example.com"] (:accepted guest))
+          "the guest still knows both recipients were accepted"))))
+
+(deftest cljk-twin-agrees-with-the-kotoba-guest
+  (when (sources-available?)
+    (doseq [{:keys [name msg recipients script]} cases]
+      (testing name
+        (is (= (guest-run @kir from (payload-for msg) recipients script)
+               (guest-run @cljk-kir from (payload-for msg) recipients script)))))))
+
+(deftest partial-refusal-must-not-become-total-failure
+  "RFC 5321 §3.3 lets some RCPT TO fail while others succeed, and the message
+  is delivered to the ones that were accepted. A guest that fails the whole
+  transaction on the first refusal discards mail that actually went out.
+
+  Assert the mutation changed the emitted value BEFORE asserting the
+  disagreement — a guest that fails to compile, or fails for some other
+  reason, must not be counted as this control firing."
+  (when (sources-available?)
+    (let [{:keys [msg recipients script]}
+          (first (filter #(= "a refused recipient keeps the mail that did go out"
+                             (:name %))
+                         cases))
+          original (get (source-map "kotoba") 'smtp.session)
+          mutated (str/replace original
+                               "(= (document-count (dg state :accepted)) 0)"
+                               "(> (document-count (dg state :rejected)) 0)")
+          _ (is (not= mutated original)
+                "the all-refused test was not found — the control mutated nothing")
+          mutated-kir (:kir (compiler/compile-project
+                             (assoc (source-map "kotoba") 'smtp.session mutated)
+                             'smtp.session :wasm32-kotoba-v1))
+          honest (guest-run @kir from (payload-for msg) recipients script)
+          broken (guest-run mutated-kir from (payload-for msg) recipients script)]
+      (is (= :failed (:phase broken))
+          "the mutation has to actually turn the partial success into a failure")
+      (is (= ["good@example.com"] (:accepted honest)))
+      (is (not= (:phase honest) (:phase broken))
+          "a partial success must not be reported as a failed send")
+      (is (= (:phase honest) (:phase (oracle-normalised (oracle-run from msg script))))
+          "and the oracle is the one the honest guest agrees with"))))
+
+(deftest the-body-is-written-once-and-only-after-354
+  "The DATA body is the one write that is not a command line. It goes out
+  after the 354 and nowhere else; a guest that emits it earlier has sent the
+  message into the command channel."
+  (when (sources-available?)
+    (let [msg {:to "a@example.com" :subject "s" :body "hi"}
+          payload (payload-for msg)
+          run (guest-run @kir from payload ["a@example.com"]
+                         ["250 MAIL OK" "250 RCPT OK" "354 go" "250 queued"])
+          written (:written run)]
+      (is (= 1 (count (filter #(= payload %) written))))
+      (is (= payload (last written)))
+      (is (= "DATA\r\n" (nth written (- (count written) 2)))))))
+
+;; --- the compile legs -------------------------------------------------------
+
+(deftest the-guest-graph-links-for-both-targets-in-process
+  "Language admission, measured rather than assumed: the same four-module
+  graph links for wasm32 and for JS. The CLI leg below reaches only one of
+  them, and this test is what keeps that difference readable as a CLI gap
+  rather than a wasm one."
+  (when (sources-available?)
+    (doseq [target [:wasm32-kotoba-v1 :js-kotoba-v1]
+            ext ["kotoba" "cljk"]]
+      (is (some? (:kir (compiler/compile-project (source-map ext) 'smtp.session target)))
+          (str ext " did not link for " target)))))
+
+(defn- kotoba-bin []
+  (or (System/getenv "KOTOBA") "kotoba"))
+
+(defn- kotoba-runnable?
+  "Whether the CLI can be EXECUTED, not whether a name resolves on PATH.
+
+  `which` answered yes for a two-line shim whose exec target had been cleaned
+  out of /tmp; the shell then exited 126 and the test reported a compile
+  failure that was really an absent toolchain. Run it and read the exit code.
+  `orgs/kotoba-lang/amu/bin/kotoba` is the binary these assertions were
+  measured against."
+  []
+  (try (zero? (:exit (shell/sh (kotoba-bin) "--help")))
+       (catch Exception _ false)))
+
+(defn- temp-dir [prefix]
+  (doto (io/file (System/getProperty "java.io.tmpdir")
+                 (str prefix "-" (System/nanoTime)))
+    (.mkdirs)))
+
+(deftest kotoba-cli-compiles-the-session-graph-for-js-and-refuses-wasm
+  "The public compile path is the CLI, and a multi-module graph goes through
+  it in two steps: `module-lock` pins the closed source map into content-
+  addressed blocks, then `compile --module-lock` emits.
+
+  Measured 2026-08-28 on amu 82c7e064, the second step reaches `js-browser`
+  and NOT `wasm32-browser`, which answers `:usage` / \"source input must use
+  .kotoba, .cljk, or .cljc\" — the module-lock route is simply not wired to a
+  non-JS target. The wasm refusal is asserted rather than skipped, so this
+  goes red on the day it is fixed and the note in session.kotoba's header
+  comes out. Every single-module guest in this repo still compiles to wasm;
+  only the linked graph does not."
+  (when (sources-available?)
+    (if (kotoba-runnable?)
+      (let [dir (temp-dir "smtp-session")
+            blocks (io/file dir "blocks")
+            lock (io/file dir "kotoba.modules.edn")
+            _ (.mkdirs blocks)
+            pin (shell/sh (kotoba-bin) "-M" "module-lock"
+                          (.getAbsolutePath (io/file guest-dir "session.kotoba"))
+                          "--source-path" (.getAbsolutePath
+                                           (io/file (System/getProperty "user.dir") "kotoba"))
+                          "--blocks" (.getAbsolutePath blocks)
+                          "--output" (.getAbsolutePath lock))]
+        (is (zero? (:exit pin)) (str "module-lock\n" (:err pin) (:out pin)))
+        (is (.isFile lock) "module-lock emitted no lock")
+        (let [js (io/file dir "session.mjs")
+              ok (shell/sh (kotoba-bin) "-M" "compile"
+                           "--module-lock" (.getAbsolutePath lock)
+                           "--blocks" (.getAbsolutePath blocks)
+                           "--target" "js-browser"
+                           "--output" (.getAbsolutePath js))]
+          (is (zero? (:exit ok)) (str "js-browser\n" (:err ok) (:out ok)))
+          (is (.isFile js) "js-browser emitted nothing"))
+        (let [wasm (io/file dir "session.wasm")
+              gap (shell/sh (kotoba-bin) "-M" "compile"
+                            "--module-lock" (.getAbsolutePath lock)
+                            "--blocks" (.getAbsolutePath blocks)
+                            "--target" "wasm32-browser"
+                            "--output" (.getAbsolutePath wasm))]
+          (is (not (zero? (:exit gap)))
+              "the CLI now links a multi-module graph for wasm32-browser —
+               remove this assertion and the gap note in session.kotoba")
+          (is (str/includes? (str (:out gap) (:err gap)) "source input must use")
+              (str "a different wasm refusal than the one on record\n"
+                   (:err gap) (:out gap)))))
+      (println "SKIP kotoba-cli-compiles-the-session-graph-for-js-and-refuses-wasm:"
+               "no runnable" (kotoba-bin) "— set KOTOBA to a working CLI"))))
