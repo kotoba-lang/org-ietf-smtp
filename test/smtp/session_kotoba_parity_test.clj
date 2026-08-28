@@ -6,10 +6,9 @@
 ;; by the SAME script and compared on what went on the wire, which recipients
 ;; were accepted, which were refused, and what a failure says.
 ;;
-;; Message composition stays in `.cljc` for now, so the body is built with
-;; `mime-message`/`dot-stuff` and handed to `init` as a value. That is the
-;; declared edge of this slice, not a claim that composition belongs on the
-;; host.
+;; `init` takes the message itself and composes its own body through
+;; `smtp.message`, so both sides start from the same value and the oracle's
+;; `mime-message`/`dot-stuff` are compared through what reaches the wire.
 ;;
 ;; `.cljc` stays the oracle and is not required from the guest
 ;; (require-graph). Nothing but this file notices the two drifting apart.
@@ -26,13 +25,15 @@
             [kotoba.kir :as ir]
             [smtp.client :as client]
             [smtp.fake-transport :as fake]
+            [smtp.guest-document :refer [->doc]]
             [smtp.protocol :as p]))
 
 (def ^:private guest-dir
   (io/file (System/getProperty "user.dir") "kotoba" "smtp"))
 
 (def ^:private modules
-  '{smtp.protocol-commands "protocol_commands"
+  '{smtp.message "message"
+    smtp.protocol-commands "protocol_commands"
     smtp.protocol-core "protocol_core"
     smtp.protocol-response "protocol_response"
     smtp.session "session"})
@@ -80,16 +81,14 @@
 (defn- guest-run
   "Drive the guest with `script`, one reply line per `step`.
 
-  `recipients` arrives with its duplicates intact — the oracle de-duplicates
-  in `recipients-of` and the guest in `add-recipient`, and a caller naming
-  the same address twice must not make the server see two RCPT TO for it.
+  `msg` is the same map the oracle is asked to send, plus `:from`, which the
+  oracle carries on the session instead. Recipients and body are derived from
+  it by `smtp.message`, exactly as `send-mail!` derives them.
 
   A script that runs out before the transaction finishes is EOF, which is
   what `closed` is for."
-  [compiled from payload recipients script]
-  (let [start (reduce (fn [s r] (call compiled 'add-recipient [s r]))
-                      (call compiled 'init [from payload])
-                      recipients)]
+  [compiled msg script]
+  (let [start (call compiled 'init [(->doc msg)])]
     (loop [state (call compiled 'start [start])
            lines script
            written []]
@@ -146,60 +145,52 @@
 (defn- payload-for [msg]
   (p/dot-stuff (or (:raw msg) (p/mime-message (assoc msg :from from)))))
 
-;; {:msg …} is what the oracle is asked to send; :recipients is the same list
-;; with its duplicates, in the order `recipients-of` produces them.
+(defn- guest-msg [msg] (assoc msg :from from))
+
+;; :msg is what the oracle is asked to send. The guest is handed the same map
+;; with `:from` folded in, and derives the recipients and the body itself.
 (def ^:private cases
   [{:name "one recipient, everything accepted"
     :msg {:to "friend@example.com" :subject "hi" :body "hello"}
-    :recipients ["friend@example.com"]
     :script ["250 OK" "250 OK" "354 go ahead" "250 queued as ABC"]}
 
    {:name "three recipients are one transaction, and a repeat is not a fourth"
     :msg {:to ["a@example.com" "b@example.com"] :cc ["c@example.com" "a@example.com"]
           :subject "s" :body "hi"}
-    :recipients ["a@example.com" "b@example.com" "c@example.com" "a@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "250 RCPT OK"
              "354 go ahead" "250 queued"]}
 
    {:name "bcc is a recipient and never a header"
     :msg {:to "a@example.com" :bcc "secret@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com" "secret@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "354 go" "250 queued"]}
 
    {:name "a refused recipient keeps the mail that did go out"
     :msg {:to ["good@example.com" "gone@example.com"] :subject "s" :body "hi"}
-    :recipients ["good@example.com" "gone@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "550 5.1.1 No such user here"
              "354 go ahead" "250 queued"]}
 
    {:name "every recipient refused is a real failure"
     :msg {:to ["gone@example.com" "also-gone@example.com"] :subject "s" :body "hi"}
-    :recipients ["gone@example.com" "also-gone@example.com"]
     :script ["250 MAIL OK" "550 5.1.1 No such user" "551 5.1.6 User has moved"]}
 
    {:name "no recipient is refused before MAIL FROM"
     :msg {:subject "s" :body "hi"}
-    :recipients []
     :script []}
 
    {:name "MAIL FROM refused"
     :msg {:to "a@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com"]
     :script ["550 5.7.1 Sender address rejected"]}
 
    {:name "DATA refused"
     :msg {:to "a@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "552 5.3.4 Message too big"]}
 
    {:name "the body itself refused at end-of-DATA"
     :msg {:to "a@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "354 go" "554 5.7.1 Message rejected"]}
 
    {:name "a multi-line refusal keeps every line of its text"
     :msg {:to "gone@example.com" :subject "s" :body "hi"}
-    :recipients ["gone@example.com"]
     :script ["250 MAIL OK"
              "550-5.1.1 The email account that you tried to reach"
              "550-5.1.1 does not exist. Please try double-checking"
@@ -207,17 +198,14 @@
 
    {:name "an unparseable reply line"
     :msg {:to "a@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com"]
     :script ["this is not an SMTP reply"]}
 
    {:name "the connection closes mid-transaction"
     :msg {:to "a@example.com" :subject "s" :body "hi"}
-    :recipients ["a@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK"]}
 
    {:name "a prebuilt raw message"
     :msg {:to "a@example.com" :raw "Subject: =?UTF-8?B?5pel?=\r\n\r\nbody"}
-    :recipients ["a@example.com"]
     :script ["250 MAIL OK" "250 RCPT OK" "354 go" "250 queued"]}])
 
 ;; --- the tests --------------------------------------------------------------
@@ -227,10 +215,10 @@
 
 (deftest the-transaction-agrees-with-the-cljc-oracle
   (when (sources-available?)
-    (doseq [{:keys [name msg recipients script]} cases]
+    (doseq [{:keys [name msg script]} cases]
       (testing name
         (let [oracle (oracle-normalised (oracle-run from msg script))
-              guest (guest-run @kir from (payload-for msg) recipients script)]
+              guest (guest-run @kir (guest-msg msg) script)]
           (if (:carries-results? oracle)
             (is (= (dissoc oracle :carries-results?) guest))
             ;; The oracle threw with the reply alone, so it has no accepted
@@ -253,8 +241,7 @@
     (let [msg {:to ["a@example.com" "b@example.com"] :subject "s" :body "hi"}
           script ["250 MAIL OK" "250 RCPT OK" "250 RCPT OK" "552 5.3.4 Message too big"]
           oracle (oracle-run from msg script)
-          guest (guest-run @kir from (payload-for msg)
-                           ["a@example.com" "b@example.com"] script)]
+          guest (guest-run @kir (guest-msg msg) script)]
       (is (= :failed (:phase oracle)))
       (is (= :failed (:phase guest)))
       (is (= (:error oracle) (:error guest)) "and they agree on why")
@@ -265,10 +252,10 @@
 
 (deftest cljk-twin-agrees-with-the-kotoba-guest
   (when (sources-available?)
-    (doseq [{:keys [name msg recipients script]} cases]
+    (doseq [{:keys [name msg script]} cases]
       (testing name
-        (is (= (guest-run @kir from (payload-for msg) recipients script)
-               (guest-run @cljk-kir from (payload-for msg) recipients script)))))))
+        (is (= (guest-run @kir (guest-msg msg) script)
+               (guest-run @cljk-kir (guest-msg msg) script)))))))
 
 (deftest partial-refusal-must-not-become-total-failure
   "RFC 5321 §3.3 lets some RCPT TO fail while others succeed, and the message
@@ -279,7 +266,7 @@
   disagreement — a guest that fails to compile, or fails for some other
   reason, must not be counted as this control firing."
   (when (sources-available?)
-    (let [{:keys [msg recipients script]}
+    (let [{:keys [msg script]}
           (first (filter #(= "a refused recipient keeps the mail that did go out"
                              (:name %))
                          cases))
@@ -292,8 +279,8 @@
           mutated-kir (:kir (compiler/compile-project
                              (assoc (source-map "kotoba") 'smtp.session mutated)
                              'smtp.session :wasm32-kotoba-v1))
-          honest (guest-run @kir from (payload-for msg) recipients script)
-          broken (guest-run mutated-kir from (payload-for msg) recipients script)]
+          honest (guest-run @kir (guest-msg msg) script)
+          broken (guest-run mutated-kir (guest-msg msg) script)]
       (is (= :failed (:phase broken))
           "the mutation has to actually turn the partial success into a failure")
       (is (= ["good@example.com"] (:accepted honest)))
@@ -309,7 +296,7 @@
   (when (sources-available?)
     (let [msg {:to "a@example.com" :subject "s" :body "hi"}
           payload (payload-for msg)
-          run (guest-run @kir from payload ["a@example.com"]
+          run (guest-run @kir (guest-msg msg)
                          ["250 MAIL OK" "250 RCPT OK" "354 go" "250 queued"])
           written (:written run)]
       (is (= 1 (count (filter #(= payload %) written))))

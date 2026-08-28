@@ -38,19 +38,20 @@ scripted in-memory `Transport`).
 ## The Kotoba guest
 
 `kotoba/smtp/` holds the protocol's product semantics as Kotoba, each file
-with a Clojure-shaped `.cljk` twin. Four modules, linked as one closed
+with a Clojure-shaped `.cljk` twin. Five modules, linked as one closed
 graph (amu ADR 0005) rather than copied into each other:
 
 | module | what it owns |
 |---|---|
-| `session` | the mail transaction: MAIL FROM, one RCPT TO per recipient, DATA, the body. `init` / `add-recipient` / `start` / `step` / `outgoing` — state in, one reply line in, next state and one inert line out. |
+| `session` | the mail transaction: MAIL FROM, one RCPT TO per recipient, DATA, the body. `init` / `start` / `step` / `outgoing` — a message in, one reply line in, next state and one inert line out. |
+| `message` | what a message is: who it addresses (To, Cc **and** Bcc, de-duplicated), its headers (never Bcc), and RFC 5321 §4.5.2 dot-stuffing. |
 | `protocol_commands` | the command lines themselves (EHLO, MAIL FROM, RCPT TO, AUTH, DATA, QUIT). |
 | `protocol_response` | reply-line structure (code, continuation, text) and RFC 3463 enhanced status, both parsed positionally rather than by regex. |
 | `protocol_core` | reply class and the SASL pick, packed into integers. A **fallback**, because the named backend's max-parameters is 5 — not the template for the rest of SMTP. |
 
-The socket, TLS, base64 and message composition stay in `.cljc` / the host.
-`throw` is not in the language, so the transaction's five `ex-info` sites
-become a `:failed` phase with the same message text.
+The socket, TLS and base64 stay in `.cljc` / the host. `throw` is not in the
+language, so the transaction's five `ex-info` sites become a `:failed` phase
+with the same message text.
 
 Compile with the kotoba CLI. It needs `-M`, an **absolute** source path,
 `--target wasm32-browser` or `js-browser` (not `wasm`/`web`), and
