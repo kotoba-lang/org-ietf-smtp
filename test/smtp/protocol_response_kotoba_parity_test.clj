@@ -128,6 +128,57 @@
       (is (true? (call @kir 'response-line? [line])) "the guest accepts it")
       (is (= "a\nb" (call @kir 'response-text [line]))))))
 
+;; ------------------------------------------- enhanced status (RFC 3463)
+
+;; `550` says a message was rejected; `5.1.1` says the mailbox does not exist
+;; and `5.7.1` says it was refused on policy grounds. The transaction records
+;; it per refused recipient, so it is reply-text structure and belongs here.
+(def ^:private texts
+  ["5.1.1 No such user here"
+   "  2.0.0 OK"
+   "\t5.2.2 Mailbox full"
+   "5.7.1"
+   "2.0.0"
+   "4.4.1 retry later"
+   "5.11.222 three-digit subject and detail"
+   ""
+   "OK"
+   "550 5.1.1 the code is not at the front"
+   "3.1.1 class 3 is not an enhanced status"
+   "5.1.1234 detail longer than three digits"
+   "5.1234.1 subject longer than three digits"
+   "5..1 empty subject"
+   "5.1. empty detail"
+   "5.1.1-hyphen still ends the word"
+   "5.1.1_underscore does not"
+   "2.0.0extra"])
+
+(deftest enhanced-status-agrees-with-the-cljc-oracle
+  (when (source-available?)
+    (doseq [text texts]
+      (is (= (or (p/enhanced-status text) "")
+             (call @kir 'enhanced-status [text]))
+          (str "enhanced-status " (pr-str text)))
+      (is (= (call @kir 'enhanced-status [text])
+             (call @cljk-kir 'enhanced-status [text]))
+          (str "cljk drifted on enhanced-status " (pr-str text))))))
+
+(deftest the-word-boundary-must-go-red
+  "Without `\\b`, \"5.1.1234\" reads as the status \"5.1.123\" and a rejection
+  is filed under a code the server never sent. Assert the mutation changed
+  the emitted value before asserting the disagreement."
+  (when (source-available?)
+    (let [mutated (str/replace (slurp kotoba-file)
+                               "(boundary? text d2)"
+                               "(not (boundary? text d2))")
+          _ (is (not= mutated (slurp kotoba-file))
+                "the boundary test was not found — the control mutated nothing")
+          mutated-kir (:kir (compiler/compile-source mutated :wasm32-kotoba-v1 {}))
+          got (call mutated-kir 'enhanced-status ["5.1.1234 detail longer than three digits"])]
+      (is (= "5.1.123" got) "the mutation has to actually drop the boundary")
+      (is (nil? (p/enhanced-status "5.1.1234 detail longer than three digits"))
+          "which the oracle refuses outright"))))
+
 (defn- kotoba-bin []
   (or (System/getenv "KOTOBA") "kotoba"))
 
