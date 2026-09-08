@@ -3,7 +3,7 @@
   quit! over an `smtp.transport/Transport`. `smtp.protocol` supplies the
   pure command/response functions; this namespace reads (possibly
   multi-line) responses until the final line and checks status codes."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [smtp.protocol :as p]
             [smtp.transport :as t]))
 
@@ -68,7 +68,7 @@
 (defn supports?
   "Whether the server advertised an ESMTP extension (case-insensitive)."
   [session extension]
-  (contains? (:extensions session {}) (str/upper-case (str extension))))
+  (contains? (:extensions session {}) (str/upper (str extension))))
 
 #?(:clj
 (defn starttls!
