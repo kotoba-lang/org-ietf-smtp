@@ -3,7 +3,7 @@
   I/O here. `smtp.transport` is the wire, `smtp.client` drives the
   request/response loop; this namespace only turns data into command
   strings and turns response lines back into data."
-  (:require [clojure.string :as str])
+  (:require [kotoba.lang.text :as str])
   #?(:clj (:import [java.util Base64])))
 
 (defn response-line
@@ -171,7 +171,7 @@
                 (let [line (str/trim (str line))]
                   (when (seq line)
                     (let [[k v] (str/split line #"\s+" 2)]
-                      [(str/upper-case k) (or v "")])))))
+                      [(str/upper k) (or v "")])))))
         (rest lines)))
 
 (defn auth-mechanisms
@@ -179,7 +179,7 @@
   [extensions]
   (->> (str/split (or (get extensions "AUTH") "") #"\s+")
        (remove str/blank?)
-       (map str/upper-case)
+       (map str/upper)
        set))
 
 (defn max-size

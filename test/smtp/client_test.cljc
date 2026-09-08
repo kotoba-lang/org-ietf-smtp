@@ -1,5 +1,5 @@
 (ns smtp.client-test
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is testing]]
             [smtp.client :as client]
             [smtp.fake-transport :as fake]
