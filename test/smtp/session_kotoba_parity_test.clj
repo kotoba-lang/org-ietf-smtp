@@ -370,17 +370,25 @@
                            "--output" (.getAbsolutePath js))]
           (is (zero? (:exit ok)) (str "js-browser\n" (:err ok) (:out ok)))
           (is (.isFile js) "js-browser emitted nothing"))
+        ;; This asserted the FAILURE until 2026-09-09, as a probe on a gap
+        ;; session.kotoba carried: `compile --module-lock --target
+        ;; wasm32-browser` answered `:usage` / "source input must use .kotoba,
+        ;; .cljk, or .cljc". The probe went red on the day the CLI grew the
+        ;; route, which is what it was for, and the note is gone. Asserting the
+        ;; SUCCESS now catches a regression from the other side -- a skip here
+        ;; would leave the multi-module wasm route with no test at all.
         (let [wasm (io/file dir "session.wasm")
-              gap (shell/sh (kotoba-bin) "-M" "compile"
-                            "--module-lock" (.getAbsolutePath lock)
-                            "--blocks" (.getAbsolutePath blocks)
-                            "--target" "wasm32-browser"
-                            "--output" (.getAbsolutePath wasm))]
-          (is (not (zero? (:exit gap)))
-              "the CLI now links a multi-module graph for wasm32-browser —
-               remove this assertion and the gap note in session.kotoba")
-          (is (str/includes? (str (:out gap) (:err gap)) "source input must use")
-              (str "a different wasm refusal than the one on record\n"
-                   (:err gap) (:out gap)))))
+              linked (shell/sh (kotoba-bin) "-M" "compile"
+                               "--module-lock" (.getAbsolutePath lock)
+                               "--blocks" (.getAbsolutePath blocks)
+                               "--target" "wasm32-browser"
+                               "--output" (.getAbsolutePath wasm))]
+          (is (zero? (:exit linked))
+              (str "the CLI no longer links a multi-module graph for "
+                   "wasm32-browser\n" (:err linked) (:out linked)))
+          (is (.isFile wasm) "wasm32-browser emitted nothing")
+          (is (str/includes? (str (:out linked) (:err linked)) ":module-lock")
+              (str "the wasm came from somewhere other than the module lock\n"
+                   (:err linked) (:out linked)))))
       (println "SKIP kotoba-cli-compiles-the-session-graph-for-js-and-refuses-wasm:"
                "no runnable" (kotoba-bin) "— set KOTOBA to a working CLI"))))

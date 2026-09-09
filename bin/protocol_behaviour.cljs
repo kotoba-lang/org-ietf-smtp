@@ -89,6 +89,14 @@
    ["extension-value SIZE"           "extension-value"       [gmail "SIZE"] "35882577"]
    ["extension-value size (folded)"  "extension-value"       [gmail "size"] "35882577"]
    ["extension-value CHUNKING"       "extension-value"       [gmail "CHUNKING"] ""]
+   ;; The VALUE keeps its case while the KEYWORD is matched case-insensitively.
+   ;; RFC 1869 4.5 makes keywords case-insensitive and nothing makes values so;
+   ;; the oracle upper-cases the keyword and returns the value untouched. A first
+   ;; version of the component folded the whole block and answered
+   ;; `login plain xoauth2` here. Mechanism matching folds both sides, so nothing
+   ;; else in this table noticed.
+   ["extension-value AUTH keeps case" "extension-value"      [gmail "auth"]
+    "LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH"]
    ["has-extension? CHUNKING"        "has-extension?"        [gmail "CHUNKING"] true]
    ["has-extension? STARTTLS"        "has-extension?"        [gmail "STARTTLS"] false]
    ["has-extension? 8bitmime"        "has-extension?"        [gmail "8bitmime"] true]

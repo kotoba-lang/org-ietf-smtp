@@ -1,3 +1,20 @@
+;; Clojure-shaped twin of protocol.kotoba (:clj-kotoba / .cljk).
+;;
+;; The EXPORTED functions carry no type annotations here: the frontend infers a
+;; parameter's type from what the body requires and a result's from what it
+;; returns. The private helpers keep theirs, and that split is measured rather
+;; than chosen -- strip a helper's annotations and its unconstrained parameters
+;; fall back to `:i64`, which surfaces as `expression type mismatch: expected
+;; string, got i64` AT THE CALL SITE, naming the caller and not the helper whose
+;; annotation is missing. 81 annotations came off, the helpers took theirs back,
+;; and what remains is the surface where inference is load-bearing.
+;;
+;; `.cljk` is :clj-kotoba, not a JVM target.
+;;
+;; This file exists to be COMPARED, not read: `protocol_esmtp_kotoba_parity_test`
+;; runs every export of both through KIR on the same inputs and fails if they
+;; disagree. Edit one and the test says you did not edit the other.
+;;
 ;; smtp.protocol as a Kotoba component -- the ESMTP capability surface and the
 ;; SASL payload framing, the last product semantics of RFC 5321 that lived only
 ;; in `.cljc`. Migrated as ONE component, not a slice (ADR-q9-whole-component-
@@ -272,10 +289,10 @@
       (tokens s (+ i 1) acc false)
       (tokens s (+ i 1) (if in? acc (+ acc 1)) true))))
 
-(defn mechanism-count [block :string] :i64
+(defn mechanism-count [block]
   (tokens (extension-value block "AUTH") 0 0 false))
 
-(defn advertises-mechanism? [block :string name :string] :bool
+(defn advertises-mechanism? [block name]
   (token? (extension-value block "AUTH") name))
 
 ;; 0 neither, 1 token, 2 password, 3 both -- the packing `protocol_core` takes,
@@ -295,7 +312,7 @@
 ;; `fuel-exhausted` on a real EHLO block while every one of its parts answered
 ;; correctly alone. The budget is charged per function entry: the fix is fewer
 ;; passes, not smaller inputs.
-(defn auth-code [block :string creds :i64] :i64
+(defn auth-code [block creds]
   (let [v (extension-value block "AUTH")]
     (cond
       (and (token? v "XOAUTH2") (or (= creds 1) (= creds 3))) 1
@@ -307,7 +324,7 @@
 ;; RFC 4616: NUL authzid NUL authcid NUL passwd, the authorization identity
 ;; empty because a client authenticating as itself does not assume another.
 ;; The host base64s this.
-(defn plain-credentials [user :string pass :string] :string
+(defn plain-credentials [user pass]
   (string-concat (string-concat "\0" user)
                  (string-concat "\0" pass)))
 
@@ -316,7 +333,7 @@
 ;; reader on the compile path (`:kotoba/source-read-failed`) while a lone one,
 ;; two in a row, and one after a letter all read. `-M check` accepts the file
 ;; either way, which is its own finding. Concatenating gives the same bytes.
-(defn xoauth2-credentials [user :string token :string] :string
+(defn xoauth2-credentials [user token]
   (string-concat
     (string-concat (string-concat "user=" user)
                    (string-concat "\0" "auth=Bearer "))
@@ -343,7 +360,7 @@
 ;; advertise SIZE with no value (RFC 1870 6.1, no fixed maximum) and that is not
 ;; a limit of zero -- `has-extension?` answers whether it was advertised, this
 ;; answers what the limit IS.
-(defn max-size [block :string] :i64
+(defn max-size [block]
   (let [v (extension-value block "SIZE")]
     (if (= (string-length v) 0)
       -1
@@ -384,7 +401,7 @@
 
 ;; The greeting is dropped, the rest is case-folded, and no CR survives. All
 ;; three are load-bearing for the substring tests above.
-(defn test-normalize [] :i64
+(defn test-normalize []
   (if (and (string=? (normalize "GREETING\r\nSize 10\r\nStartTLS")
                      "\nsize 10\nstarttls\n")
            (not (string-contains? (normalize "a\r\nb") "\r")))
@@ -392,7 +409,7 @@
 
 ;; On the REAL response: the greeting is line 0 and is not an extension, and
 ;; this is the assertion that caught it answering TRUE for the server domain.
-(defn test-greeting-is-not-an-extension [] :i64
+(defn test-greeting-is-not-an-extension []
   (if (and (not (has-extension? (gmail) "smtp.gmail.com"))
            (string=? (extension-value (gmail) "size") "35882577"))
     1 0))
@@ -400,7 +417,7 @@
 ;; CLIENTTOKEN is a substring of PLAIN-CLIENTTOKEN and was never offered on its
 ;; own; a client that tries it authenticates with a mechanism the server does
 ;; not have. The same pair runs against Gmail's six mechanisms in the script.
-(defn test-whole-token [] :i64
+(defn test-whole-token []
   (if (and (advertises-mechanism? (small) "plain-clienttoken")
            (not (advertises-mechanism? (small) "clienttoken")))
     1 0))
@@ -408,17 +425,17 @@
 ;; The pick table. The four real-block cases -- token / password / neither /
 ;; server-named-none, the last distinguishing "no mechanism we support" from
 ;; "no mechanism at all" -- are in the script.
-(defn test-auth-code [] :i64
+(defn test-auth-code []
   (if (= (auth-code (small) 2) 2) 1 0))
 
 ;; The digit scan and the -1 for absent. RFC 1870's number does not get harder
 ;; with more extensions around it.
-(defn test-max-size [] :i64
+(defn test-max-size []
   (if (and (= (max-size (small)) 10)
            (= (max-size "greeting\nSTARTTLS") -1))
     1 0))
 
-(defn test-sasl [] :i64
+(defn test-sasl []
   ;; 1 + 4 + 1 + 6 = 12, and 6 + 1 + 13 + 1 + 1 = 22, only if each NUL is
   ;; exactly one character.
   (if (and (= (string-length (plain-credentials "user" "secret")) 12)
