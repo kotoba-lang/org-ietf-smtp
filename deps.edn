@@ -8,7 +8,7 @@
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
-                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd6605cb6c0efc275e1df1736f6e90d4d73"}
                       ;; TEST-ONLY. Parity compiles kotoba/smtp/*.kotoba
                       ;; and runs it against smtp.protocol. Nothing in :paths
                       ;; depends on either of these.
@@ -33,7 +33,7 @@
   :test-pure
   {:extra-paths ["test"]
    :extra-deps {io.github.cognitect-labs/test-runner
-                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+                {:git/tag "v0.5.1" :git/sha "dfb30dd6605cb6c0efc275e1df1736f6e90d4d73"}}
    :main-opts ["-m" "cognitect.test-runner"
                "-n" "smtp.protocol-test"
                "-n" "smtp.client-test"]}
