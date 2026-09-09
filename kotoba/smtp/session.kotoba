@@ -37,20 +37,20 @@
 ;; `mail-from-line` or `positive?` into this file would have been the mirror
 ;; ADR-2608261100 forbids.
 ;;
-;; One boundary, measured, and not a reason to fold this into scalars:
+;; That boundary is gone, and the probe that was watching for it fired:
 ;;
-;;   The CLI's multi-module route reaches only `js-browser`. Measured
-;;   2026-08-28 on amu 82c7e064: `compile --module-lock … --target
-;;   wasm32-browser` answers `:usage` / "source input must use .kotoba,
-;;   .cljk, or .cljc", and the `--unpinned --source-path` form answers
-;;   `:subset` / "only a bounded :export vector is admitted in namespace
-;;   clauses". In-process `compile-project` links this same graph for BOTH
-;;   `:wasm32-kotoba-v1` and `:js-kotoba-v1` (measured on the pinned amu
-;;   dd943e08, which is what the parity test runs), so the ceiling is CLI
-;;   routing, not the language and not the wasm backend. Removal: when
-;;   `compile --module-lock` accepts a non-JS target. The parity test asserts
-;;   the failure rather than skipping it, so it goes red on the day it is
-;;   fixed.
+;;   Until 2026-09-09 this file carried a measured gap -- the CLI's
+;;   multi-module route reached only `js-browser`, and `compile --module-lock
+;;   … --target wasm32-browser` answered `:usage` / "source input must use
+;;   .kotoba, .cljk, or .cljc". The note named its own removal condition and
+;;   the parity test asserted the FAILURE rather than skipping it, so that it
+;;   would go red on the day the CLI grew the route.
+;;
+;;   It went red. Measured 2026-09-09: the same command answers `{:ok true,
+;;   :target :wasm32-browser-kotoba-v1, :kotoba.compile/inputs :module-lock}`
+;;   and writes the wasm plus its provenance and inputs files. The parity test
+;;   now asserts the SUCCESS, so a regression in CLI routing is caught from the
+;;   other side. Nobody had to remember this note; the assertion did.
 ;;
 ;; `.cljc` remains the oracle and is not required from here (require-graph).
 ;; Clojure-shaped twin: session.cljk.
