@@ -20,7 +20,7 @@
 ;; `creds` packs the caller's secrets so the pick stays inside max-parameters
 ;; (5): 0 neither, 1 token, 2 password, 3 both.
 ;;
-;; Checked against `smtp.protocol` in test/smtp/protocol_kotoba_parity_test.clj.
+;; Checked against `smtp.protocol` in test/smtp/protocol_kotoba_parity_test.cljk.
 ;;
 ;; Clojure-shaped twin: `protocol_core.cljk`. Compile either with
 ;; `kotoba compile kotoba/smtp/protocol_core.kotoba --target wasm -o core.wasm`

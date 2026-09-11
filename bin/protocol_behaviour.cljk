@@ -22,13 +22,13 @@
 ;;
 ;; This is not the repository's parity standard. That is a JVM test compiling the
 ;; guest to KIR and executing it against `smtp.protocol` with a mutation control
-;; (`test/smtp/protocol_response_kotoba_parity_test.clj` is the pattern), plus a
+;; (`test/smtp/protocol_response_kotoba_parity_test.cljk` is the pattern), plus a
 ;; `.cljk` twin. Both are OWED for this component and are named in its header.
 ;; The expected values below were transcribed from the oracle by hand, which is
 ;; weaker: it catches drift in the guest and not drift in the oracle.
 ;;
 ;; Usage (needs the kotoba CLI on PATH; skips loudly if it is absent):
-;;   nbb bin/protocol_behaviour.cljs
+;;   nbb bin/protocol_behaviour.cljk
 
 (ns protocol-behaviour
   (:require ["node:child_process" :as cp]
