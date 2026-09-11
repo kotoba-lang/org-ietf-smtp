@@ -112,7 +112,7 @@
 ;;
 ;; Compile / run (the CLI needs -M and an ABSOLUTE path):
 ;;   kotoba -M test /abs/kotoba/smtp/protocol.kotoba --json
-;;   nbb bin/protocol_behaviour.cljk
+;;   kbb --backend sci bin/protocol_behaviour.cljk
 
 (ns smtp.protocol
   (:export [normalize normalize-raw extension-count extension-value has-extension?
