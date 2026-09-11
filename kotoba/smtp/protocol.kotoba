@@ -74,7 +74,7 @@
 ;;
 ;; ## Parity, and what it found
 ;;
-;; `test/smtp/protocol_esmtp_kotoba_parity_test.clj` is this repository's parity
+;; `test/smtp/protocol_esmtp_kotoba_parity_test.cljk` is this repository's parity
 ;; standard applied here: it compiles both guests to KIR and executes every export
 ;; against the oracle `smtp.protocol` over nine EHLO blocks (real Gmail, minimal,
 ;; no AUTH, no SIZE, lower-case keywords, CRLF, bare keyword only, greeting only,
@@ -106,13 +106,13 @@
 ;; annotated, the two sources emit byte-identical js apart from the filename and
 ;; the two provenance digests.
 ;;
-;; `.cljc` remains the oracle. `bin/protocol_behaviour.cljs` carries the
+;; `.cljc` remains the oracle. `bin/protocol_behaviour.cljk` carries the
 ;; exhaustive value table (24 behaviours, real Gmail block, fresh instance per
 ;; call) and prints the fuel costs it measures.
 ;;
 ;; Compile / run (the CLI needs -M and an ABSOLUTE path):
 ;;   kotoba -M test /abs/kotoba/smtp/protocol.kotoba --json
-;;   nbb bin/protocol_behaviour.cljs
+;;   nbb bin/protocol_behaviour.cljk
 
 (ns smtp.protocol
   (:export [normalize normalize-raw extension-count extension-value has-extension?
@@ -364,7 +364,7 @@
 ;; returning 1 when run alone.
 ;;
 ;; So the exhaustive table (23 behaviours, real Gmail block, fresh instance per
-;; call) is `bin/protocol_behaviour.cljs`, and that script PRINTS the costs it
+;; call) is `bin/protocol_behaviour.cljk`, and that script PRINTS the costs it
 ;; measures -- including these -- so these numbers cannot quietly go stale.
 ;;
 ;; The two assertions that need a REAL response keep it: case folding across a

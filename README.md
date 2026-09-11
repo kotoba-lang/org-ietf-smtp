@@ -32,7 +32,7 @@ smtp.client    -- the session driver: connect!/ehlo!/auth-login!/send-mail!/quit
 `smtp.protocol` has zero I/O -- parsing/building is pure and tested without
 a socket. `smtp.client` drives the read-until-final-line loop (SMTP
 multi-line responses use `250-` for continuation, `250 ` for the last
-line) over an injected `Transport` (`test/smtp/fake_transport.cljc`, a
+line) over an injected `Transport` (`test/smtp/fake_transport.cljk`, a
 scripted in-memory `Transport`).
 
 ## The Kotoba guest
