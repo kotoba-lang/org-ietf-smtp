@@ -1,4 +1,4 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; `kotoba/smtp/protocol.kotoba` against a REAL EHLO response, and against the
 ;; fuel budget that decides how it has to be written.
 ;;
@@ -28,7 +28,7 @@
 ;; weaker: it catches drift in the guest and not drift in the oracle.
 ;;
 ;; Usage (needs the kotoba CLI on PATH; skips loudly if it is absent):
-;;   nbb bin/protocol_behaviour.cljk
+;;   kbb --backend sci bin/protocol_behaviour.cljk
 
 (ns protocol-behaviour
   (:require ["node:child_process" :as cp]

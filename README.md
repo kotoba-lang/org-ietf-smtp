@@ -78,12 +78,12 @@ kotoba -M compile --module-lock target/kotoba.modules.edn \
   --blocks target/blocks --target js-browser --output session.mjs
 ```
 
-Parity: `clojure -M:test` compiles the `.kotoba` objects and checks them
+Parity: `kbb -M:test` compiles the `.kotoba` objects and checks them
 against `smtp.protocol` and `smtp.client` — the full SASL table, each
 command line, every reply line, and the whole transaction driven from the
 same scripts as the oracle. Set `KOTOBA` to a runnable CLI to include the
 compile legs; without one they print `SKIP` rather than passing quietly.
-`clojure -M:test-pure` is the `.cljc` suite alone, with no compiler
+`kbb -M:test-pure` is the `.cljc` suite alone, with no compiler
 dependency. `.cljc` is not allowed to require `.kotoba`.
 
 ## RFC 5321 coverage
@@ -143,8 +143,8 @@ for that shape.
 ## Tests
 
 ```sh
-clojure -M:test-pure   # .cljc only
-clojure -M:test        # plus Kotoba parity (needs git deps amu + kotoba-kir)
+kbb -M:test-pure   # .cljc only
+kbb -M:test        # plus Kotoba parity (needs git deps amu + kotoba-kir)
 ```
 
 No live server or network access required -- every `smtp.client` test
