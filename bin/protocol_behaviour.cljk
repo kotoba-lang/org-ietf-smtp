@@ -42,7 +42,7 @@
 ;; which reads like a broken source file rather than a broken invocation.
 (def ^:private component
   (let [self (some->> (js->clj (.-argv js/process))
-                      (filter #(.endsWith % "protocol_behaviour.cljs"))
+                      (filter #(.endsWith % "protocol_behaviour.cljk"))
                       first)]
     (path/join (if self
                  (path/dirname (path/dirname (path/resolve self)))
