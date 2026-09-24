@@ -17,7 +17,7 @@
 ;; the one rule in `send-mail!`'s docstring that a careless port loses.
 
 (ns smtp.session-kotoba-parity-test
-  (:require [clojure.java.io :as io]
+  (:require [kotoba.io :as io]
             [clojure.java.shell :as shell]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
@@ -47,8 +47,8 @@
   (every? (fn [[_ base]]
             (let [f (io/file guest-dir (str base ".kotoba"))
                   t (io/file guest-dir (str base ".cljk"))]
-              (and (is (.exists f) (str "kotoba object not found at " f))
-                   (is (.exists t) (str "cljk object not found at " t)))))
+              (and (is (io/exists? f) (str "kotoba object not found at " f))
+                   (is (io/exists? t) (str "cljk object not found at " t)))))
           modules))
 
 (def ^:private kir
@@ -334,7 +334,7 @@
 (defn- temp-dir [prefix]
   (doto (io/file (System/getProperty "java.io.tmpdir")
                  (str prefix "-" (System/nanoTime)))
-    (.mkdirs)))
+    (io/mkdirs)))
 
 (deftest kotoba-cli-compiles-the-session-graph-for-js-and-refuses-wasm
   "The public compile path is the CLI, and a multi-module graph goes through
@@ -353,23 +353,23 @@
       (let [dir (temp-dir "smtp-session")
             blocks (io/file dir "blocks")
             lock (io/file dir "kotoba.modules.edn")
-            _ (.mkdirs blocks)
+            _ (io/mkdirs blocks)
             pin (shell/sh (kotoba-bin) "-M" "module-lock"
-                          (.getAbsolutePath (io/file guest-dir "session.kotoba"))
-                          "--source-path" (.getAbsolutePath
+                          (io/absolute-path (io/file guest-dir "session.kotoba"))
+                          "--source-path" (io/absolute-path
                                            (io/file (System/getProperty "user.dir") "kotoba"))
-                          "--blocks" (.getAbsolutePath blocks)
-                          "--output" (.getAbsolutePath lock))]
+                          "--blocks" (io/absolute-path blocks)
+                          "--output" (io/absolute-path lock))]
         (is (zero? (:exit pin)) (str "module-lock\n" (:err pin) (:out pin)))
-        (is (.isFile lock) "module-lock emitted no lock")
+        (is (io/file? lock) "module-lock emitted no lock")
         (let [js (io/file dir "session.mjs")
               ok (shell/sh (kotoba-bin) "-M" "compile"
-                           "--module-lock" (.getAbsolutePath lock)
-                           "--blocks" (.getAbsolutePath blocks)
+                           "--module-lock" (io/absolute-path lock)
+                           "--blocks" (io/absolute-path blocks)
                            "--target" "js-browser"
-                           "--output" (.getAbsolutePath js))]
+                           "--output" (io/absolute-path js))]
           (is (zero? (:exit ok)) (str "js-browser\n" (:err ok) (:out ok)))
-          (is (.isFile js) "js-browser emitted nothing"))
+          (is (io/file? js) "js-browser emitted nothing"))
         ;; This asserted the FAILURE until 2026-09-09, as a probe on a gap
         ;; session.kotoba carried: `compile --module-lock --target
         ;; wasm32-browser` answered `:usage` / "source input must use .kotoba,
@@ -379,14 +379,14 @@
         ;; would leave the multi-module wasm route with no test at all.
         (let [wasm (io/file dir "session.wasm")
               linked (shell/sh (kotoba-bin) "-M" "compile"
-                               "--module-lock" (.getAbsolutePath lock)
-                               "--blocks" (.getAbsolutePath blocks)
+                               "--module-lock" (io/absolute-path lock)
+                               "--blocks" (io/absolute-path blocks)
                                "--target" "wasm32-browser"
-                               "--output" (.getAbsolutePath wasm))]
+                               "--output" (io/absolute-path wasm))]
           (is (zero? (:exit linked))
               (str "the CLI no longer links a multi-module graph for "
                    "wasm32-browser\n" (:err linked) (:out linked)))
-          (is (.isFile wasm) "wasm32-browser emitted nothing")
+          (is (io/file? wasm) "wasm32-browser emitted nothing")
           (is (str/includes? (str (:out linked) (:err linked)) ":module-lock")
               (str "the wasm came from somewhere other than the module lock\n"
                    (:err linked) (:out linked)))))
