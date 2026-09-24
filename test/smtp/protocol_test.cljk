@@ -1,6 +1,6 @@
 (ns smtp.protocol-test
   (:require [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [smtp.protocol :as p]))
 
 (deftest response-line-parses-final-vs-continuation-lines
