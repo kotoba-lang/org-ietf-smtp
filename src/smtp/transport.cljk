@@ -10,7 +10,8 @@
   Deliberately not shared code with `org-ietf-imap`'s identically-shaped
   `imap.transport` -- same structural idea, different protocol, kept
   independent per this org's grab-bag-library convention (see this
-  library's ADR-0001).")
+  library's ADR-0001)."
+  (:require [kotoba.netcap.tls-host :as tls-host]))
 
 (defprotocol Transport
   (write! [t s] "Write string `s` (already CRLF-terminated by the caller) to the wire.")
@@ -45,7 +46,5 @@
   SMTP Submission over implicit TLS). `timeout-ms` bounds each individual
   socket read."
   [{:keys [host port timeout-ms] :or {port 465 timeout-ms 20000}}]
-  (let [factory (javax.net.ssl.SSLSocketFactory/getDefault)
-        socket (.createSocket ^javax.net.ssl.SSLSocketFactory factory ^String host (int port))]
-    (.setSoTimeout ^javax.net.ssl.SSLSocket socket (int timeout-ms))
+  (let [socket (tls-host/connect {:host host :port (int port) :timeout-ms (int timeout-ms)})]
     (->SocketTransport socket (.getInputStream socket) (.getOutputStream socket)))))
