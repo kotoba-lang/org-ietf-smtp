@@ -1,5 +1,5 @@
 (ns smtp.client-test
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.lang.error :as kerror] [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
             [smtp.client :as client]
             [smtp.fake-transport :as fake]
@@ -10,7 +10,7 @@
     (is (some? (:transport (client/connect! "smtp.example.com" {:transport transport})))))
   (let [{:keys [transport]} (fake/make ["421 service not available"])]
     (is (thrown-with-msg?
-         #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+         kerror/ExceptionInfo
          #"greeting"
          (client/connect! "smtp.example.com" {:transport transport})))))
 
@@ -54,7 +54,7 @@
         session (client/connect! "smtp.example.com" {:transport transport})
         session (client/ehlo! session "client")]
     (is (thrown-with-msg?
-         #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+         kerror/ExceptionInfo
          #"AUTH LOGIN failed"
          (client/auth-login! session "u" "wrong")))))
 
@@ -130,7 +130,7 @@
   (let [{:keys [session]} (connected
                            ["220 ready" "250 MAIL OK" "550 5.1.1 No such user"])]
     (is (thrown-with-msg?
-         #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+         kerror/ExceptionInfo
          #"every recipient"
          (client/send-mail! (assoc session :from "me@example.com")
                             {:to "gone@example.com" :subject "s" :body "hi"})))))
@@ -138,7 +138,7 @@
 (deftest a-send-with-no-recipient-is-refused-before-mail-from
   (let [{:keys [session]} (connected ["220 ready"])]
     (is (thrown-with-msg?
-         #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+         kerror/ExceptionInfo
          #"no recipient"
          (client/send-mail! (assoc session :from "me@example.com")
                             {:subject "s" :body "hi"})))))
@@ -175,7 +175,7 @@
                                      ["220 ready"
                                       "334 eyJzdGF0dXMiOiI0MDEifQ=="
                                       "535 5.7.8 Bad credentials"])]
-      (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+      (is (thrown? kerror/ExceptionInfo
                    (client/auth-xoauth2! session "me@example.com" "expired")))
       (is (= "\r\n" (second @written)) "the empty line that finishes it")))
   (testing "and a good token just succeeds"
@@ -204,7 +204,7 @@
             rather than sending a password in a form it cannot"
     (let [{:keys [session]} (connected ["220 ready"])
           s (assoc session :auth-mechanisms #{"GSSAPI" "NTLM"})]
-      (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+      (is (thrown? kerror/ExceptionInfo
                    (client/authenticate! s {:user "me" :password "pw"}))))))
 
 (deftest raw-sends-a-prebuilt-message
