@@ -3,8 +3,7 @@
   I/O here. `smtp.transport` is the wire, `smtp.client` drives the
   request/response loop; this namespace only turns data into command
   strings and turns response lines back into data."
-  (:require [kotoba.lang.text :as str])
-  #?(:clj (:import [java.util Base64])))
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text :as str]))
 
 (defn response-line
   "Parse one SMTP response line (\"<code>-<text>\" mid-multiline or
@@ -153,7 +152,7 @@
   made the whole of SASL unreachable from ClojureScript for no reason
   other than that nobody had needed it yet."
   [s]
-  #?(:clj (.encodeToString (Base64/getEncoder) (.getBytes (str s) "UTF-8"))
+  #?(:clj (kbytes/base64-encode (kbytes/utf8-bytes (str s)))
      :cljs (.toString (js/Buffer.from (str s) "utf-8") "base64")))
 
 ;; ------------------------------------------------------ ESMTP (RFC 1869)

@@ -17,7 +17,7 @@
 ;; the one rule in `send-mail!`'s docstring that a careless port loses.
 
 (ns smtp.session-kotoba-parity-test
-  (:require [kotoba.io :as io]
+  (:require [kotoba.lang.error :as kerror] [kotoba.io :as io]
             [clojure.java.shell :as shell]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
@@ -118,7 +118,7 @@
          :accepted (vec (:accepted result))
          :rejected (mapv #(select-keys % [:recipient :code :status :text])
                          (:rejected result))})
-      (catch clojure.lang.ExceptionInfo e
+      (catch kerror/ExceptionInfo e
         (let [data (ex-data e)]
           {:phase :failed
            :written @written

@@ -15,7 +15,7 @@
 ;; guest broken some other way cannot be counted as the control firing.
 
 (ns smtp.protocol-response-kotoba-parity-test
-  (:require [clojure.java.io :as io]
+  (:require [kotoba.io :as io]
             [clojure.java.shell :as shell]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is]]
@@ -30,8 +30,8 @@
   (io/file (System/getProperty "user.dir") "kotoba" "smtp" "protocol_response.cljk"))
 
 (defn- source-available? []
-  (let [kotoba? (.exists kotoba-file)
-        cljk? (.exists cljk-file)]
+  (let [kotoba? (io/exists? kotoba-file)
+        cljk? (io/exists? cljk-file)]
     (is kotoba? (str "kotoba object not found at " kotoba-file))
     (is cljk? (str "cljk object not found at " cljk-file))
     (and kotoba? cljk?)))
@@ -204,16 +204,16 @@
     (if (kotoba-runnable?)
       (let [dir (io/file (System/getProperty "java.io.tmpdir")
                          (str "smtp-response-" (System/nanoTime)))]
-        (.mkdirs dir)
+        (io/mkdirs dir)
         (doseq [[label src] [["kotoba" kotoba-file] ["cljk" cljk-file]]
                 [target ext] [["wasm32-browser" ".wasm"] ["js-browser" ".mjs"]]
                 :let [out (io/file dir (str label "-" target ext))
                       result (shell/sh (kotoba-bin) "-M" "compile"
-                                       (.getAbsolutePath src)
+                                       (io/absolute-path src)
                                        "--target" target
-                                       "--output" (.getAbsolutePath out))]]
+                                       "--output" (io/absolute-path out))]]
           (is (zero? (:exit result))
               (str label " -M compile --target " target "\n" (:err result) (:out result)))
-          (is (.isFile out) (str label " " target " emitted nothing"))))
+          (is (io/file? out) (str label " " target " emitted nothing"))))
       (println "SKIP kotoba-cli-compiles-response-sources: no runnable"
                (kotoba-bin) "— set KOTOBA to a working CLI"))))
